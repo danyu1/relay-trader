@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relaytrader"
+version = "0.1.0"
+description = "Microstructure-aware backtesting engine for relay-trader"
+authors = [{ name = "Daniel Hernandez" }]
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0.0",
+  "numpy>=1.24.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "black",
+  "mypy",
+  "ruff",
+]
+
+[project.scripts]
+relay-backtest = "relaytrader.cli:main"
+
+[tool.setuptools]
+packages = ["relaytrader"]

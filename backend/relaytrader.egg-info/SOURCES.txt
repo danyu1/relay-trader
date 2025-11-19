@@ -5,6 +5,8 @@ relaytrader/cli.py
 relaytrader.egg-info/PKG-INFO
 relaytrader.egg-info/SOURCES.txt
 relaytrader.egg-info/dependency_links.txt
+relaytrader.egg-info/entry_points.txt
+relaytrader.egg-info/requires.txt
 relaytrader.egg-info/top_level.txt
 relaytrader/api/main.py
 relaytrader/core/backtest.py

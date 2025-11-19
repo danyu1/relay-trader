@@ -36,7 +36,7 @@ class Portfolio:
         pos = self.positions[symbol]
         before_qty = pos.qty
         pos.apply_fill(fill)
-        # cash update
+        #cash update
         sign = 1 if fill.side == Side.SELL else -1
         self.cash += sign * fill.qty * fill.price - fill.commission - fill.slippage
         #iff position fully closed, you could drop it:

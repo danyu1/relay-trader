@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Type
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -42,6 +42,25 @@ class BacktestResponse(BaseModel):
     stats: Dict[str, Any]
     trades: list[Dict[str, Any]]
     orders: list[Dict[str, Any]]
+
+
+class UploadResponse(BaseModel):
+    name: str
+    path: str
+    size: int
+
+
+class DatasetInfo(BaseModel):
+    name: str
+    path: str
+
+
+class DatasetListResponse(BaseModel):
+    datasets: list[DatasetInfo]
+
+
+DATA_DIR = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_strategy_from_code(code: str, class_name: str) -> Type[Strategy]:
@@ -111,9 +130,35 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
             "annualized_return": result.stats.annualized_return,
             "volatility": result.stats.volatility,
             "sharpe": result.stats.sharpe,
+            "sortino": result.stats.sortino,
+            "calmar": result.stats.calmar,
             "max_drawdown": result.stats.max_drawdown,
             "equity_curve": result.stats.equity_curve,
+            "drawdown_curve": result.stats.drawdown_curve,
         },
         trades=result.trades,
         orders=result.orders,
     )
+
+
+@app.get("/datasets", response_model=DatasetListResponse)
+def list_datasets() -> DatasetListResponse:
+    if not DATA_DIR.exists():
+        return DatasetListResponse(datasets=[])
+    files = [
+        DatasetInfo(name=f.name, path=str(f.resolve()))
+        for f in DATA_DIR.glob("*.csv")
+        if f.is_file()
+    ]
+    files = sorted(files, key=lambda d: d.name.lower())
+    return DatasetListResponse(datasets=files)
+
+
+@app.post("/upload-dataset", response_model=UploadResponse)
+async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are accepted")
+    dest_path = DATA_DIR / Path(file.filename).name
+    content = await file.read()
+    dest_path.write_bytes(content)
+    return UploadResponse(name=dest_path.name, path=str(dest_path), size=len(content))

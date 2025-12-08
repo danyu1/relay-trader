@@ -11,8 +11,12 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import dynamic from "next/dynamic";
+import { python } from "@codemirror/lang-python";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
+
+const CodeEditor = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
 
 type BacktestStats = {
   total_return: number;
@@ -26,6 +30,18 @@ type BacktestStats = {
   drawdown_curve: number[];
 };
 
+type TradeStats = {
+  total_pnl: number;
+  net_pnl: number;
+  total_commission: number;
+  total_slippage: number;
+  win_rate: number;
+  avg_win: number;
+  avg_loss: number;
+  num_trades: number;
+  turnover: number;
+};
+
 type Trade = {
   order_id?: number;
   timestamp: string;
@@ -35,6 +51,7 @@ type Trade = {
   price: number;
   commission?: number;
   slippage?: number;
+  realized_pnl?: number;
 };
 
 type OrderResponse = {
@@ -53,8 +70,31 @@ type OrderResponse = {
 type BacktestResponse = {
   config: Record<string, any>;
   stats: BacktestStats;
+  trade_stats: TradeStats;
   trades: Trade[];
   orders: OrderResponse[];
+};
+
+type HistoryEntry = {
+  savedAt: string;
+  result: BacktestResponse;
+  form: {
+    symbol: string;
+    csvPath: string;
+    initialCash: number;
+    maxBars: number | null;
+    commission: number;
+    slippageBps: number;
+  };
+};
+
+type DatasetInfo = {
+  name: string;
+  path: string;
+  rows?: number;
+  start?: number;
+  end?: number;
+  columns?: string[];
 };
 
 const DEFAULT_STRATEGY = `from relaytrader.core.strategy import Strategy
@@ -97,11 +137,13 @@ export default function Page() {
   const [initialCash, setInitialCash] = useState(100000);
   const [maxBars, setMaxBars] = useState<number | undefined>(2000);
   const [commission, setCommission] = useState(0);
+  const [slippageBps, setSlippageBps] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResponse | null>(null);
-  const [datasets, setDatasets] = useState<{ name: string; path: string }[]>([]);
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8001";
   const STORAGE_KEY = "relaytrader:backtest-form";
@@ -120,6 +162,7 @@ export default function Page() {
         setMaxBars(saved.maxBars ?? undefined);
       }
       if (typeof saved.commission === "number") setCommission(saved.commission);
+      if (typeof saved.slippageBps === "number") setSlippageBps(saved.slippageBps);
       if (typeof saved.strategyCode === "string" && saved.strategyCode.length > 0) {
         setStrategyCode(saved.strategyCode);
       }
@@ -129,13 +172,27 @@ export default function Page() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // hydrate history
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("relaytrader:history");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setHistory(parsed);
+      }
+    } catch (e) {
+      console.warn("Failed to load history", e);
+    }
+  }, []);
+
   // load datasets from backend
   useEffect(() => {
     const fetchDatasets = async () => {
       try {
         const res = await fetch(`${apiBase}/datasets`);
         if (!res.ok) return;
-        const json = (await res.json()) as { datasets: { name: string; path: string }[] };
+        const json = (await res.json()) as { datasets: DatasetInfo[] };
         setDatasets(json.datasets || []);
       } catch (e) {
         console.warn("Dataset fetch failed", e);
@@ -153,10 +210,11 @@ export default function Page() {
       initialCash,
       maxBars: maxBars ?? null,
       commission,
+      slippageBps,
       strategyCode,
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [symbol, csvPath, initialCash, maxBars, commission, strategyCode]);
+  }, [symbol, csvPath, initialCash, maxBars, commission, slippageBps, strategyCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,6 +230,7 @@ export default function Page() {
         symbol,
         initial_cash: initialCash,
         commission_per_trade: commission,
+        slippage_bps: slippageBps,
         max_bars: maxBars ?? null,
         strategy_params: null,
       };
@@ -189,6 +248,23 @@ export default function Page() {
 
       const json = (await res.json()) as BacktestResponse;
       setResult(json);
+      const entry: HistoryEntry = {
+        savedAt: new Date().toISOString(),
+        result: json,
+        form: {
+          symbol,
+          csvPath,
+          initialCash,
+          maxBars: maxBars ?? null,
+          commission,
+          slippageBps,
+        },
+      };
+      const nextHistory = [entry, ...history].slice(0, 5);
+      setHistory(nextHistory);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("relaytrader:history", JSON.stringify(nextHistory));
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Backtest failed");
@@ -214,7 +290,7 @@ export default function Page() {
       // refresh list
       const listRes = await fetch(`${apiBase}/datasets`);
       if (listRes.ok) {
-        const listJson = (await listRes.json()) as { datasets: { name: string; path: string }[] };
+        const listJson = (await listRes.json()) as { datasets: DatasetInfo[] };
         setDatasets(listJson.datasets || []);
       }
     } catch (err: any) {
@@ -358,6 +434,19 @@ export default function Page() {
                       onChange={(e) => setCommission(Number(e.target.value) || 0)}
                     />
                   </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-200 uppercase tracking-wide">
+                      Slippage (bps)
+                    </label>
+                    <input
+                      type="number"
+                      className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500/50"
+                      value={slippageBps}
+                      min={0}
+                      step={0.1}
+                      onChange={(e) => setSlippageBps(Number(e.target.value) || 0)}
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -394,6 +483,34 @@ export default function Page() {
                     <p className="text-[10px] text-slate-500">
                       Pick an uploaded dataset or paste an absolute path readable by FastAPI.
                     </p>
+                    {csvPath && (
+                      <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-[11px] text-slate-400">
+                        {(() => {
+                          const ds = datasets.find((d) => d.path === csvPath || csvPath.endsWith(d.name));
+                          if (!ds) return <span className="text-amber-400">Path not in uploaded datasets.</span>;
+                          if (ds.rows == null || ds.start == null || ds.end == null) {
+                            return <span className="text-amber-400">Metadata unavailable for this dataset.</span>;
+                          }
+                          return (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-slate-300">
+                                <span>Rows</span>
+                                <span>{ds.rows}</span>
+                              </div>
+                              <div className="flex justify-between text-slate-300">
+                                <span>Range</span>
+                                <span>
+                                  {ds.start} → {ds.end}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                Columns: {ds.columns?.join(", ") || "unknown"}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                     <label className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 px-4 py-3 text-xs text-slate-300 transition hover:border-sky-500 hover:bg-slate-900/80">
                       <span className="font-semibold">Upload CSV</span>
                       <span className="text-[10px] text-slate-500">
@@ -409,6 +526,11 @@ export default function Page() {
                     </label>
                     {uploading && (
                       <p className="text-[11px] text-sky-400">Uploading...</p>
+                    )}
+                    {error && (
+                      <p className="text-[11px] text-rose-400">
+                        {error}
+                      </p>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
@@ -431,11 +553,20 @@ export default function Page() {
                   <label className="text-xs font-semibold text-slate-200 uppercase tracking-wide">
                     Strategy Code (Python)
                   </label>
-                  <textarea
-                    className="min-h-[260px] rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs font-mono outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500/50"
-                    value={strategyCode}
-                    onChange={(e) => setStrategyCode(e.target.value)}
-                  />
+                  <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+                    <CodeEditor
+                      value={strategyCode}
+                      height="280px"
+                      theme="dark"
+                      extensions={[python()]}
+                      onChange={(val) => setStrategyCode(val)}
+                      basicSetup={{
+                        lineNumbers: true,
+                        foldGutter: true,
+                        highlightActiveLine: true,
+                      }}
+                    />
+                  </div>
                   <p className="text-[11px] text-slate-500">Subclass Strategy and implement hooks; your code runs server-side.</p>
                 </div>
 
@@ -493,6 +624,26 @@ export default function Page() {
                     <Stat
                       label="Bars"
                       value={result.stats.equity_curve.length.toString()}
+                    />
+                    <Stat
+                      label="Win Rate"
+                      value={(result.trade_stats.win_rate * 100).toFixed(1) + "%"}
+                    />
+                    <Stat
+                      label="Avg Win"
+                      value={result.trade_stats.avg_win.toFixed(2)}
+                    />
+                    <Stat
+                      label="Avg Loss"
+                      value={result.trade_stats.avg_loss.toFixed(2)}
+                    />
+                    <Stat
+                      label="Turnover"
+                      value={result.trade_stats.turnover.toFixed(2)}
+                    />
+                    <Stat
+                      label="Net PnL"
+                      value={result.trade_stats.net_pnl.toFixed(2)}
                     />
                   </div>
                   <div className="grid grid-cols-1 gap-3">
@@ -568,6 +719,7 @@ export default function Page() {
                       <th className="py-1 pr-2 text-right">Qty</th>
                       <th className="py-1 pr-2 text-right">Price</th>
                       <th className="py-1 pr-2 text-right">Fees</th>
+                      <th className="py-1 pr-2 text-right">Realized</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -591,6 +743,9 @@ export default function Page() {
                         </td>
                         <td className="py-1 pr-2 text-right text-slate-400">
                           {((t.commission ?? 0) + (t.slippage ?? 0)).toFixed(2)}
+                        </td>
+                        <td className="py-1 pr-2 text-right text-slate-200">
+                          {t.realized_pnl != null ? t.realized_pnl.toFixed(2) : "-"}
                         </td>
                       </tr>
                     ))}
@@ -659,6 +814,59 @@ export default function Page() {
                 </table>
               ) : (
                 <p className="text-sm text-slate-400">No orders yet.</p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-2xl shadow-slate-950/60 backdrop-blur max-h-[320px] overflow-auto">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-50">Run History</h2>
+                <span className="text-[11px] text-slate-400">Last 5</span>
+              </div>
+              {history.length > 0 ? (
+                <ul className="space-y-2 text-xs text-slate-300">
+                  {history.map((h, idx) => (
+                    <li
+                      key={idx}
+                      className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 hover:border-sky-500/60 transition"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-100">{h.form.symbol}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {new Date(h.savedAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-slate-400">
+                        <span>Ret: {(h.result.stats.total_return * 100).toFixed(2)}%</span>
+                        <span>DD: {(h.result.stats.max_drawdown * 100).toFixed(2)}%</span>
+                        <span>Sharpe: {h.result.stats.sharpe.toFixed(2)}</span>
+                        <span>Win: {(h.result.trade_stats?.win_rate * 100 || 0).toFixed(1)}%</span>
+                      </div>
+                      <div className="mt-2 flex gap-2 text-[11px] text-slate-400">
+                        <button
+                          className="rounded-md border border-slate-700 px-2 py-1 hover:border-sky-500 transition"
+                          onClick={() => setResult(h.result)}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="rounded-md border border-slate-700 px-2 py-1 hover:border-sky-500 transition"
+                          onClick={() => {
+                            setSymbol(h.form.symbol);
+                            setCsvPath(h.form.csvPath);
+                            setInitialCash(h.form.initialCash);
+                            setMaxBars(h.form.maxBars ?? undefined);
+                            setCommission(h.form.commission);
+                            setSlippageBps(h.form.slippageBps);
+                          }}
+                        >
+                          Load Config
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-400">No runs yet.</p>
               )}
             </div>
           </section>

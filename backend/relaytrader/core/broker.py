@@ -53,10 +53,17 @@ class SimpleBroker(BrokerContext):
     - Limit sell: fill if bar.high >= limit_price
     """
 
-    def __init__(self, initial_cash: float, symbol: str, commission_per_trade: float = 0.0):
+    def __init__(
+        self,
+        initial_cash: float,
+        symbol: str,
+        commission_per_trade: float = 0.0,
+        slippage_bps: float = 0.0,
+    ):
         self.portfolio = Portfolio(cash=initial_cash)
         self.symbol = symbol
         self.commission_per_trade = commission_per_trade
+        self.slippage_bps = slippage_bps
 
         self._orders: Dict[int, Order] = {}
         self._fills: List[Fill] = []
@@ -186,6 +193,7 @@ class SimpleBroker(BrokerContext):
                 continue
 
             fill_price: Optional[float] = None
+            triggered: bool = False
 
             if order.order_type == OrderType.MARKET:
                 fill_price = bar.close
@@ -198,9 +206,30 @@ class SimpleBroker(BrokerContext):
                     if bar.high >= order.limit_price:
                         fill_price = max(order.limit_price, bar.close)
 
-            #(STOP, STOP_LIMIT, etc. can be added later)
+            elif order.order_type == OrderType.STOP:
+                if order.stop_price is None:
+                    continue
+                if order.side == Side.BUY and bar.high >= order.stop_price:
+                    triggered = True
+                    fill_price = max(order.stop_price, bar.close)
+                elif order.side == Side.SELL and bar.low <= order.stop_price:
+                    triggered = True
+                    fill_price = min(order.stop_price, bar.close)
+
+            elif order.order_type == OrderType.STOP_LIMIT:
+                if order.stop_price is None or order.limit_price is None:
+                    continue
+                if order.side == Side.BUY and bar.high >= order.stop_price:
+                    triggered = True
+                    if bar.low <= order.limit_price:
+                        fill_price = min(order.limit_price, bar.close)
+                elif order.side == Side.SELL and bar.low <= order.stop_price:
+                    triggered = True
+                    if bar.high >= order.limit_price:
+                        fill_price = max(order.limit_price, bar.close)
 
             if fill_price is not None:
+                slippage_amt = abs(fill_price * order.qty * (self.slippage_bps / 10_000))
                 fill = Fill(
                     order_id=order.id,
                     timestamp=bar.timestamp,
@@ -209,7 +238,7 @@ class SimpleBroker(BrokerContext):
                     qty=order.qty - order.filled_qty,
                     price=fill_price,
                     commission=self.commission_per_trade,
-                    slippage=0.0,
+                    slippage=slippage_amt,
                 )
                 fills.append(fill)
 
@@ -222,6 +251,9 @@ class SimpleBroker(BrokerContext):
                 order.status = OrderStatus.FILLED
 
                 self._fills.append(fill)
+            elif triggered:
+                #stop was triggered but limit not satisfied: keep order open
+                pass
 
         self.portfolio.update_equity({self.symbol: bar.close})
         return fills

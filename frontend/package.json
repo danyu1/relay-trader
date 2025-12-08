@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "@codemirror/lang-python": "^6.2.1",
+    "@uiw/react-codemirror": "^4.22.3",
     "next": "16.0.3",
     "react": "19.2.0",
     "react-chartjs-2": "^5.3.1",

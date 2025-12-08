@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from ..core.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from ..core.strategy import Strategy
-from ..core.data import CSVBarDataFeed
+from ..core.data import CSVBarDataFeed, inspect_csv
 
 app = FastAPI(title="RelayTrader API", version="0.1.0")
 
@@ -33,6 +33,7 @@ class BacktestRequest(BaseModel):
     symbol: str
     initial_cash: float = 100_000.0
     commission_per_trade: float = 0.0
+    slippage_bps: float = 0.0
     max_bars: int | None = None
     strategy_params: Dict[str, Any] | None = None
 
@@ -40,6 +41,7 @@ class BacktestRequest(BaseModel):
 class BacktestResponse(BaseModel):
     config: Dict[str, Any]
     stats: Dict[str, Any]
+    trade_stats: Dict[str, Any]
     trades: list[Dict[str, Any]]
     orders: list[Dict[str, Any]]
 
@@ -53,6 +55,10 @@ class UploadResponse(BaseModel):
 class DatasetInfo(BaseModel):
     name: str
     path: str
+    rows: int | None = None
+    start: int | None = None
+    end: int | None = None
+    columns: list[str] | None = None
 
 
 class DatasetListResponse(BaseModel):
@@ -109,6 +115,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         symbol=req.symbol,
         initial_cash=req.initial_cash,
         commission_per_trade=req.commission_per_trade,
+        slippage_bps=req.slippage_bps,
         max_bars=req.max_bars,
     )
 
@@ -123,6 +130,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
             "symbol": result.config.symbol,
             "initial_cash": result.config.initial_cash,
             "commission_per_trade": result.config.commission_per_trade,
+            "slippage_bps": result.config.slippage_bps,
             "max_bars": result.config.max_bars,
         },
         stats={
@@ -136,6 +144,17 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
             "equity_curve": result.stats.equity_curve,
             "drawdown_curve": result.stats.drawdown_curve,
         },
+        trade_stats={
+            "total_pnl": result.trade_stats.total_pnl,
+            "net_pnl": result.trade_stats.net_pnl,
+            "total_commission": result.trade_stats.total_commission,
+            "total_slippage": result.trade_stats.total_slippage,
+            "win_rate": result.trade_stats.win_rate,
+            "avg_win": result.trade_stats.avg_win,
+            "avg_loss": result.trade_stats.avg_loss,
+            "num_trades": result.trade_stats.num_trades,
+            "turnover": result.trade_stats.turnover,
+        },
         trades=result.trades,
         orders=result.orders,
     )
@@ -145,11 +164,25 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
 def list_datasets() -> DatasetListResponse:
     if not DATA_DIR.exists():
         return DatasetListResponse(datasets=[])
-    files = [
-        DatasetInfo(name=f.name, path=str(f.resolve()))
-        for f in DATA_DIR.glob("*.csv")
-        if f.is_file()
-    ]
+    files: list[DatasetInfo] = []
+    for f in DATA_DIR.glob("*.csv"):
+        if not f.is_file():
+            continue
+        try:
+            meta = inspect_csv(f)
+            files.append(
+                DatasetInfo(
+                    name=f.name,
+                    path=str(f.resolve()),
+                    rows=meta.get("rows"),
+                    start=meta.get("start"),
+                    end=meta.get("end"),
+                    columns=meta.get("columns"),
+                )
+            )
+        except Exception:
+            files.append(DatasetInfo(name=f.name, path=str(f.resolve())))
+
     files = sorted(files, key=lambda d: d.name.lower())
     return DatasetListResponse(datasets=files)
 
@@ -161,4 +194,9 @@ async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
     dest_path = DATA_DIR / Path(file.filename).name
     content = await file.read()
     dest_path.write_bytes(content)
+    try:
+        meta = inspect_csv(dest_path)
+    except Exception as e:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Invalid CSV: {e}")
     return UploadResponse(name=dest_path.name, path=str(dest_path), size=len(content))

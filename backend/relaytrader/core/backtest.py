@@ -7,7 +7,7 @@ from .types import Bar
 from .strategy import Strategy
 from .data import BarDataFeed
 from .broker import SimpleBroker
-from .metrics import PerformanceStats, compute_performance
+from .metrics import PerformanceStats, compute_performance, compute_trade_stats, TradeStats
 
 
 @dataclass
@@ -15,6 +15,7 @@ class BacktestConfig:
     symbol: str
     initial_cash: float = 100_000.0
     commission_per_trade: float = 0.0
+    slippage_bps: float = 0.0
     max_bars: Optional[int] = None  #for debugging
 
 
@@ -22,6 +23,7 @@ class BacktestConfig:
 class BacktestResult:
     config: BacktestConfig
     stats: PerformanceStats
+    trade_stats: TradeStats
     trades: List[Dict[str, Any]]  #simplified; you can structure later
     orders: List[Dict[str, Any]]
 
@@ -44,6 +46,7 @@ class BacktestEngine:
             initial_cash=self.config.initial_cash,
             symbol=self.config.symbol,
             commission_per_trade=self.config.commission_per_trade,
+            slippage_bps=self.config.slippage_bps,
         )
 
         strategy = strategy_cls(context=broker, params=strategy_params)
@@ -67,10 +70,11 @@ class BacktestEngine:
         strategy.on_end()
 
         stats = compute_performance(equity_curve)
+        trade_stats, realized_list = compute_trade_stats(broker.fills, initial_cash=self.config.initial_cash)
 
         #serialize orders + trades for reporting
         trades: List[Dict[str, Any]] = []
-        for fill in broker.fills:
+        for fill, realized in zip(broker.fills, realized_list):
             trades.append(
                 {
                     "order_id": fill.order_id,
@@ -81,6 +85,7 @@ class BacktestEngine:
                     "price": fill.price,
                     "commission": fill.commission,
                     "slippage": fill.slippage,
+                    "realized_pnl": realized,
                 }
             )
 
@@ -104,6 +109,7 @@ class BacktestEngine:
         return BacktestResult(
             config=self.config,
             stats=stats,
+            trade_stats=trade_stats,
             trades=trades,
             orders=orders,
         )

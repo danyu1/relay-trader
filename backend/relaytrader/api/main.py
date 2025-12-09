@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
+import json
 import sys
 import textwrap
 import tempfile
+import time
+import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Type
+from typing import Dict, Any, Type, List
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -48,6 +53,11 @@ class BacktestRequest(BaseModel):
         return self
 
 
+class LintRequest(BaseModel):
+    strategy_code: str
+    strategy_class_name: str = "UserStrategy"
+
+
 class BacktestResponse(BaseModel):
     config: Dict[str, Any]
     stats: Dict[str, Any]
@@ -56,6 +66,9 @@ class BacktestResponse(BaseModel):
     orders: list[Dict[str, Any]]
     price_series: list[float]
     timestamps: list[int]
+    strategy: Dict[str, Any] | None = None
+    run_id: str
+    diagnostics: Dict[str, Any]
 
 
 class UploadResponse(BaseModel):
@@ -79,6 +92,24 @@ class DatasetListResponse(BaseModel):
 
 DATA_DIR = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+RUNS_FILE = DATA_DIR / "runs.json"
+
+
+def load_run_records() -> List[Dict[str, Any]]:
+    if not RUNS_FILE.exists():
+        return []
+    try:
+        return json.loads(RUNS_FILE.read_text())
+    except json.JSONDecodeError:
+        return []
+
+
+def persist_run_record(record: Dict[str, Any]) -> None:
+    runs = load_run_records()
+    runs = [r for r in runs if r.get("run_id") != record.get("run_id")]
+    runs.insert(0, record)
+    runs = runs[:50]
+    RUNS_FILE.write_text(json.dumps(runs))
 
 
 def load_strategy_from_code(code: str, class_name: str) -> Type[Strategy]:
@@ -116,10 +147,24 @@ def strategies() -> Dict[str, Any]:
     return {"strategies": list_strategies()}
 
 
+@app.post("/lint-strategy")
+def lint_strategy(req: LintRequest) -> Dict[str, str]:
+    try:
+        tree = ast.parse(req.strategy_code)
+    except SyntaxError as exc:
+        raise HTTPException(status_code=400, detail=f"Syntax error: {exc}") from exc
+    has_class = any(isinstance(node, ast.ClassDef) and node.name == req.strategy_class_name for node in ast.walk(tree))
+    if not has_class:
+        raise HTTPException(status_code=400, detail=f"Strategy class '{req.strategy_class_name}' not found")
+    return {"status": "ok"}
+
+
 @app.post("/backtest", response_model=BacktestResponse)
 def backtest(req: BacktestRequest) -> BacktestResponse:
     strategy_cls: Type[Strategy]
     strategy_params: Dict[str, Any] | None = req.strategy_params
+    run_start = time.perf_counter()
+    started_at = datetime.utcnow().isoformat() + "Z"
 
     if req.builtin_strategy_id:
         try:
@@ -158,13 +203,46 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Backtest execution error: {e}")
 
-    return BacktestResponse(
+    runtime_ms = (time.perf_counter() - run_start) * 1000
+    run_id = uuid.uuid4().hex
+    applied_strategy_params: Dict[str, Any] = strategy_params or {}
+    strategy_payload: Dict[str, Any] = {
+        "mode": "builtin" if req.builtin_strategy_id else "custom",
+        "class_name": strategy_cls.__name__,
+        "builtin_id": req.builtin_strategy_id,
+        "params": applied_strategy_params,
+        "submitted_params": req.strategy_params if req.strategy_code else req.builtin_params,
+    }
+    form_snapshot = {
+        "symbol": req.symbol,
+        "csv_path": req.csv_path,
+        "initial_cash": req.initial_cash,
+        "max_bars": req.max_bars,
+        "commission_per_trade": req.commission_per_trade,
+        "slippage_bps": req.slippage_bps,
+        "mode": "builtin" if req.builtin_strategy_id else "custom",
+        "builtin_id": req.builtin_strategy_id,
+        "builtin_params": req.builtin_params,
+        "strategy_params": req.strategy_params,
+    }
+    diagnostics = {
+        "run_id": run_id,
+        "started_at": started_at,
+        "completed_at": datetime.utcnow().isoformat() + "Z",
+        "runtime_ms": runtime_ms,
+        "bars_processed": len(result.price_series),
+        "engine_version": "0.1.0",
+        "form": form_snapshot,
+    }
+
+    response = BacktestResponse(
         config={
             "symbol": result.config.symbol,
             "initial_cash": result.config.initial_cash,
             "commission_per_trade": result.config.commission_per_trade,
             "slippage_bps": result.config.slippage_bps,
             "max_bars": result.config.max_bars,
+            "strategy_params": applied_strategy_params,
         },
         stats={
             "total_return": result.stats.total_return,
@@ -192,7 +270,14 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         orders=result.orders,
         price_series=result.price_series,
         timestamps=result.timestamps,
+        run_id=run_id,
+        diagnostics=diagnostics,
+        strategy=strategy_payload,
     )
+    record = response.model_dump()
+    record["saved_at"] = diagnostics["completed_at"]
+    persist_run_record(record)
+    return response
 
 
 @app.get("/datasets", response_model=DatasetListResponse)
@@ -256,3 +341,28 @@ def dataset_preview(name: str, limit: int = 5) -> Dict[str, Any]:
     head = df.head(limit).to_dict(orient="records")
     tail = df.tail(limit).to_dict(orient="records")
     return {"name": name, "head": head, "tail": tail}
+
+
+@app.get("/runs")
+def list_runs() -> Dict[str, Any]:
+    runs = load_run_records()
+    summaries = [
+        {
+            "run_id": r.get("run_id"),
+            "saved_at": r.get("saved_at") or r.get("diagnostics", {}).get("completed_at"),
+            "symbol": r.get("config", {}).get("symbol"),
+            "total_return": r.get("stats", {}).get("total_return"),
+            "max_drawdown": r.get("stats", {}).get("max_drawdown"),
+        }
+        for r in runs
+    ]
+    return {"runs": summaries}
+
+
+@app.get("/runs/{run_id}")
+def get_run(run_id: str) -> Dict[str, Any]:
+    runs = load_run_records()
+    for record in runs:
+        if record.get("run_id") == run_id:
+            return record
+    raise HTTPException(status_code=404, detail="Run not found")

@@ -5,4 +5,10 @@
 html, body {
   padding: 0;
   margin: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
 }

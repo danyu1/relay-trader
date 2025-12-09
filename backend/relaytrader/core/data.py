@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Protocol, List
+from typing import Iterable, Protocol, List, Optional, Union
 
 import pandas as pd
 
@@ -23,10 +23,22 @@ class CSVBarDataFeed:
         self.csv_path = Path(csv_path)
         self.symbol = symbol
 
+    @staticmethod
+    def _parse_timestamp(ts: Union[int, float, str]) -> int:
+        if isinstance(ts, (int, float)):
+            return int(ts)
+        if isinstance(ts, str):
+            dt = pd.to_datetime(ts, errors="coerce")
+            if pd.isna(dt):
+                raise ValueError(f"Invalid timestamp: {ts}")
+            return int(dt.timestamp() * 1000)  # ms since epoch
+        raise ValueError(f"Unsupported timestamp type: {type(ts)}")
+
     def bars(self) -> Iterable[Bar]:
         df = pd.read_csv(self.csv_path)
         for row in df.itertuples(index=False):
-            ts = getattr(row, "timestamp")
+            ts_raw = getattr(row, "timestamp")
+            ts = self._parse_timestamp(ts_raw)
             o = float(getattr(row, "open"))
             h = float(getattr(row, "high"))
             l = float(getattr(row, "low"))
@@ -61,15 +73,21 @@ def inspect_csv(path: str | Path) -> dict:
         if subset[col].isnull().any():
             raise ValueError(f"Non-numeric values in column: {col}")
 
-    # timestamps monotonic
-    ts = subset["timestamp"]
-    if (ts.diff().dropna() < 0).any():
+    # timestamps normalize and monotonic
+    parsed_ts = subset["timestamp"].apply(CSVBarDataFeed._parse_timestamp)
+    if parsed_ts.isnull().any():
+        raise ValueError("Non-numeric timestamps found")
+    if (parsed_ts.diff().dropna() < 0).any():
         raise ValueError("Timestamps are not monotonically increasing")
+
+    # normalize timestamps to int (allow ISO8601 strings but they should have parsed)
+    start_val: Optional[int] = int(parsed_ts.iloc[0]) if len(parsed_ts) > 0 else None
+    end_val: Optional[int] = int(parsed_ts.iloc[-1]) if len(parsed_ts) > 0 else None
 
     meta = {
         "rows": int(len(df)),
-        "start": int(ts.iloc[0]) if len(ts) > 0 else None,
-        "end": int(ts.iloc[-1]) if len(ts) > 0 else None,
+        "start": start_val,
+        "end": end_val,
         "columns": list(df.columns),
         "path": str(csv_path.resolve()),
     }

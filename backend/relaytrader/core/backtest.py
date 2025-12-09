@@ -26,6 +26,8 @@ class BacktestResult:
     trade_stats: TradeStats
     trades: List[Dict[str, Any]]  #simplified; you can structure later
     orders: List[Dict[str, Any]]
+    price_series: List[float]
+    timestamps: List[int]
 
 
 class BacktestEngine:
@@ -52,6 +54,8 @@ class BacktestEngine:
         strategy = strategy_cls(context=broker, params=strategy_params)
 
         equity_curve: List[float] = []
+        price_series: List[float] = []
+        timestamps: List[int] = []
 
         strategy.on_start()
 
@@ -66,6 +70,8 @@ class BacktestEngine:
             strategy.on_bar(bar)
 
             equity_curve.append(broker.get_equity())
+            price_series.append(bar.close)
+            timestamps.append(bar.timestamp)
 
         strategy.on_end()
 
@@ -112,4 +118,6 @@ class BacktestEngine:
             trade_stats=trade_stats,
             trades=trades,
             orders=orders,
+            price_series=price_series,
+            timestamps=timestamps,
         )

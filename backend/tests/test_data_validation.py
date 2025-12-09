@@ -34,3 +34,24 @@ def test_inspect_csv_rejects_missing_columns(tmp_path: Path):
         assert "Missing required columns" in str(e)
     else:
         raise AssertionError("inspect_csv should have failed for missing columns")
+
+
+def test_inspect_csv_rejects_non_numeric_timestamp(tmp_path: Path):
+    csv = tmp_path / "bad_ts.csv"
+    df = pd.DataFrame(
+        {
+          "timestamp": ["a", "b"],
+          "open": [10, 11],
+          "high": [11, 12],
+          "low": [9, 10],
+          "close": [10, 11],
+          "volume": [100, 110],
+        }
+    )
+    df.to_csv(csv, index=False)
+    try:
+        inspect_csv(csv)
+    except Exception as e:
+        assert "timestamp" in str(e)
+    else:
+        raise AssertionError("inspect_csv should have failed for non-numeric timestamps")

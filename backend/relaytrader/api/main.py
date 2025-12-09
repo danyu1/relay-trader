@@ -7,13 +7,15 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Type
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ..core.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from ..core.strategy import Strategy
 from ..core.data import CSVBarDataFeed, inspect_csv
+from ..strategies import list_strategies, get_strategy_class
 
 app = FastAPI(title="RelayTrader API", version="0.1.0")
 
@@ -27,8 +29,10 @@ app.add_middleware(
 
 
 class BacktestRequest(BaseModel):
-    strategy_code: str
+    strategy_code: str | None = None
     strategy_class_name: str = "UserStrategy"
+    builtin_strategy_id: str | None = None
+    builtin_params: Dict[str, Any] | None = None
     csv_path: str
     symbol: str
     initial_cash: float = 100_000.0
@@ -37,6 +41,12 @@ class BacktestRequest(BaseModel):
     max_bars: int | None = None
     strategy_params: Dict[str, Any] | None = None
 
+    @model_validator(mode="after")
+    def validate_strategy_choice(self) -> "BacktestRequest":
+        if not self.strategy_code and not self.builtin_strategy_id:
+            raise ValueError("Provide either strategy_code or builtin_strategy_id")
+        return self
+
 
 class BacktestResponse(BaseModel):
     config: Dict[str, Any]
@@ -44,6 +54,8 @@ class BacktestResponse(BaseModel):
     trade_stats: Dict[str, Any]
     trades: list[Dict[str, Any]]
     orders: list[Dict[str, Any]]
+    price_series: list[float]
+    timestamps: list[int]
 
 
 class UploadResponse(BaseModel):
@@ -99,12 +111,33 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/strategies")
+def strategies() -> Dict[str, Any]:
+    return {"strategies": list_strategies()}
+
+
 @app.post("/backtest", response_model=BacktestResponse)
 def backtest(req: BacktestRequest) -> BacktestResponse:
-    try:
-        strategy_cls = load_strategy_from_code(req.strategy_code, req.strategy_class_name)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Strategy load error: {e}")
+    strategy_cls: Type[Strategy]
+    strategy_params: Dict[str, Any] | None = req.strategy_params
+
+    if req.builtin_strategy_id:
+        try:
+            definition = get_strategy_class(req.builtin_strategy_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Unknown built-in strategy: {e}")
+        strategy_cls = definition.cls
+        strategy_params = req.builtin_params or {}
+        # apply defaults for any missing params
+        for p in definition.params:
+            strategy_params.setdefault(p.name, p.default)
+    else:
+        if not req.strategy_code:
+            raise HTTPException(status_code=400, detail="strategy_code required for custom strategies")
+        try:
+            strategy_cls = load_strategy_from_code(req.strategy_code, req.strategy_class_name)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Strategy load error: {e}")
 
     csv_path = Path(req.csv_path)
     if not csv_path.exists():
@@ -121,7 +154,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
 
     try:
         engine = BacktestEngine(data_feed=data_feed, config=config)
-        result: BacktestResult = engine.run(strategy_cls=strategy_cls, strategy_params=req.strategy_params)
+        result: BacktestResult = engine.run(strategy_cls=strategy_cls, strategy_params=strategy_params)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Backtest execution error: {e}")
 
@@ -157,6 +190,8 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         },
         trades=result.trades,
         orders=result.orders,
+        price_series=result.price_series,
+        timestamps=result.timestamps,
     )
 
 
@@ -200,3 +235,24 @@ async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
         dest_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {e}")
     return UploadResponse(name=dest_path.name, path=str(dest_path), size=len(content))
+
+
+@app.get("/dataset-preview")
+def dataset_preview(name: str, limit: int = 5) -> Dict[str, Any]:
+    if limit <= 0:
+        limit = 5
+    if limit > 50:
+        limit = 50
+
+    file_path = (DATA_DIR / name).resolve()
+    if not file_path.exists() or file_path.parent != DATA_DIR:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    try:
+        df = pd.read_csv(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read dataset: {e}")
+
+    head = df.head(limit).to_dict(orient="records")
+    tail = df.tail(limit).to_dict(orient="records")
+    return {"name": name, "head": head, "tail": tail}

@@ -1,0 +1,28 @@
+{
+  "GOOGL_20241210-20251209.csv": {
+    "symbol": "GOOGL",
+    "company_name": "Alphabet Inc.",
+    "display_name": "Alphabet Inc. (GOOGL)",
+    "filename": "GOOGL_20241210-20251209.csv",
+    "path": "/home/danyul/relay-trader/backend/data/GOOGL_20241210-20251209.csv",
+    "rows": 250,
+    "start": 1733893200000,
+    "end": 1765342800000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "2024-12-10",
+    "end_date_label": "2025-12-09",
+    "date_range_label": "2024-12-10 \u2192 2025-12-09",
+    "downloaded_at": "2025-12-11T00:30:54.551106Z",
+    "request_key": "GOOGL:1y",
+    "start_param": null,
+    "end_param": null,
+    "period": "1y"
+  }
+}

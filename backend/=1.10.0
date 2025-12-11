@@ -1,0 +1,5 @@
+Collecting scipy
+  Using cached scipy-1.15.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (37.7 MB)
+Requirement already satisfied: numpy<2.5,>=1.23.5 in ./.venv/lib/python3.10/site-packages (from scipy) (2.2.6)
+Installing collected packages: scipy
+Successfully installed scipy-1.15.3

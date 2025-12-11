@@ -15,3 +15,7 @@ relaytrader/core/data.py
 relaytrader/core/metrics.py
 relaytrader/core/strategy.py
 relaytrader/core/types.py
+tests/test_backtest_engine.py
+tests/test_broker.py
+tests/test_data_validation.py
+tests/test_metrics.py

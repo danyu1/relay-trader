@@ -135,7 +135,6 @@ const endOf = (time: number, unit: Unit) => {
 
 if (_adapters._date) {
   _adapters._date.override({
-    _id: "native",
     formats: () => ({
       datetime: "MMM d, yyyy, HH:mm",
       millisecond: "HH:mm:ss.SSS",

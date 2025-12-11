@@ -6,10 +6,12 @@ Author: Daniel Hernandez
 Requires-Python: >=3.10
 Requires-Dist: pandas>=2.0.0
 Requires-Dist: numpy>=1.24.0
+Requires-Dist: scipy>=1.10.0
 Requires-Dist: fastapi>=0.115.0
 Requires-Dist: uvicorn[standard]>=0.30.0
 Requires-Dist: pydantic>=2.8.0
 Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: yfinance>=0.2.0
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: black; extra == "dev"

@@ -20,7 +20,10 @@ from pydantic import BaseModel, model_validator
 from ..core.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from ..core.strategy import Strategy
 from ..core.data import CSVBarDataFeed, inspect_csv
+from ..core.annotations import TradeAnnotation, AnnotationSet, OptionSettings, SimulatedTrade, ManualBacktestStats
+from ..core.manual_simulator import ManualSimulator
 from ..strategies import list_strategies, get_strategy_class
+from ..data import DataDownloader
 
 app = FastAPI(title="RelayTrader API", version="0.1.0")
 
@@ -34,6 +37,7 @@ app.add_middleware(
 
 
 class BacktestRequest(BaseModel):
+    mode: str = "mechanical"  # "mechanical" or "manual"
     strategy_code: str | None = None
     strategy_class_name: str = "UserStrategy"
     builtin_strategy_id: str | None = None
@@ -45,11 +49,18 @@ class BacktestRequest(BaseModel):
     slippage_bps: float = 0.0
     max_bars: int | None = None
     strategy_params: Dict[str, Any] | None = None
+    # Manual mode fields
+    annotations: list[TradeAnnotation] | None = None
+    option_settings: OptionSettings | None = None
 
     @model_validator(mode="after")
     def validate_strategy_choice(self) -> "BacktestRequest":
-        if not self.strategy_code and not self.builtin_strategy_id:
-            raise ValueError("Provide either strategy_code or builtin_strategy_id")
+        if self.mode == "mechanical":
+            if not self.strategy_code and not self.builtin_strategy_id:
+                raise ValueError("Provide either strategy_code or builtin_strategy_id for mechanical mode")
+        elif self.mode == "manual":
+            if not self.annotations:
+                raise ValueError("Provide annotations for manual mode")
         return self
 
 
@@ -59,6 +70,7 @@ class LintRequest(BaseModel):
 
 
 class BacktestResponse(BaseModel):
+    mode: str = "mechanical"
     config: Dict[str, Any]
     stats: Dict[str, Any]
     trade_stats: Dict[str, Any]
@@ -69,6 +81,9 @@ class BacktestResponse(BaseModel):
     strategy: Dict[str, Any] | None = None
     run_id: str
     diagnostics: Dict[str, Any]
+    # Manual mode fields
+    manual_stats: Dict[str, Any] | None = None
+    simulated_trades: list[Dict[str, Any]] | None = None
 
 
 class UploadResponse(BaseModel):
@@ -84,15 +99,38 @@ class DatasetInfo(BaseModel):
     start: int | None = None
     end: int | None = None
     columns: list[str] | None = None
+    symbol: str | None = None
+    company_name: str | None = None
+    display_name: str | None = None
+    start_label: str | None = None
+    end_label: str | None = None
+    date_range_label: str | None = None
+    downloaded_at: str | None = None
 
 
 class DatasetListResponse(BaseModel):
     datasets: list[DatasetInfo]
 
 
+def _ts_to_label(ts: int | None) -> str | None:
+    if ts is None:
+        return None
+    return datetime.utcfromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+
+
+def _symbol_from_filename(filename: str) -> str:
+    base = Path(filename).stem
+    return base.split("_")[0].upper() if base else filename.upper()
+
+
 DATA_DIR = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RUNS_FILE = DATA_DIR / "runs.json"
+ANNOTATIONS_DIR = DATA_DIR / "annotations"
+ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Initialize data downloader
+downloader = DataDownloader(DATA_DIR)
 
 
 def load_run_records() -> List[Dict[str, Any]]:
@@ -161,10 +199,74 @@ def lint_strategy(req: LintRequest) -> Dict[str, str]:
 
 @app.post("/backtest", response_model=BacktestResponse)
 def backtest(req: BacktestRequest) -> BacktestResponse:
-    strategy_cls: Type[Strategy]
-    strategy_params: Dict[str, Any] | None = req.strategy_params
     run_start = time.perf_counter()
     started_at = datetime.utcnow().isoformat() + "Z"
+    run_id = uuid.uuid4().hex
+
+    csv_path = Path(req.csv_path)
+    if not csv_path.exists():
+        raise HTTPException(status_code=400, detail="CSV path does not exist on server")
+
+    data_feed = CSVBarDataFeed(csv_path=csv_path, symbol=req.symbol)
+
+    # Manual mode
+    if req.mode == "manual":
+        if not req.annotations or not req.option_settings:
+            raise HTTPException(status_code=400, detail="Manual mode requires annotations and option_settings")
+
+        # Load price data
+        import pandas as pd
+        df = pd.read_csv(csv_path)
+        timestamps = df["timestamp"].tolist()
+        price_series = df["close"].tolist()
+
+        # Run simulation
+        simulator = ManualSimulator(
+            annotations=req.annotations,
+            timestamps=timestamps,
+            price_series=price_series,
+            option_settings=req.option_settings,
+        )
+        simulated_trades, manual_stats = simulator.simulate()
+
+        runtime_ms = (time.perf_counter() - run_start) * 1000
+
+        diagnostics = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "completed_at": datetime.utcnow().isoformat() + "Z",
+            "runtime_ms": runtime_ms,
+            "bars_processed": len(price_series),
+            "engine_version": "0.1.0-manual",
+            "mode": "manual",
+        }
+
+        response = BacktestResponse(
+            mode="manual",
+            config={
+                "symbol": req.symbol,
+                "initial_cash": req.initial_cash,
+                "option_settings": req.option_settings.model_dump(),
+            },
+            stats={},  # No mechanical stats for manual mode
+            trade_stats={},  # No mechanical trade stats
+            trades=[],
+            orders=[],
+            price_series=price_series,
+            timestamps=timestamps,
+            run_id=run_id,
+            diagnostics=diagnostics,
+            manual_stats=manual_stats.model_dump(),
+            simulated_trades=[t.model_dump() for t in simulated_trades],
+        )
+        record = response.model_dump()
+        record["saved_at"] = diagnostics["completed_at"]
+        persist_run_record(record)
+        return response
+
+    # Mechanical mode (original logic)
+    strategy_cls: Type[Strategy]
+    strategy_params: Dict[str, Any] | None = req.strategy_params
 
     if req.builtin_strategy_id:
         try:
@@ -290,18 +392,35 @@ def list_datasets() -> DatasetListResponse:
             continue
         try:
             meta = inspect_csv(f)
-            files.append(
-                DatasetInfo(
-                    name=f.name,
-                    path=str(f.resolve()),
-                    rows=meta.get("rows"),
-                    start=meta.get("start"),
-                    end=meta.get("end"),
-                    columns=meta.get("columns"),
-                )
-            )
         except Exception:
             files.append(DatasetInfo(name=f.name, path=str(f.resolve())))
+            continue
+
+        manifest_meta = downloader.manifest_entry_for_filename(f.name)
+        start_label = (manifest_meta or {}).get("start_date_label") or _ts_to_label(meta.get("start"))
+        end_label = (manifest_meta or {}).get("end_date_label") or _ts_to_label(meta.get("end"))
+        date_range_label = (manifest_meta or {}).get("date_range_label")
+        if not date_range_label and start_label and end_label:
+            date_range_label = f"{start_label} → {end_label}"
+        symbol = (manifest_meta or {}).get("symbol") or _symbol_from_filename(f.name)
+        display_name = (manifest_meta or {}).get("display_name") or symbol
+        files.append(
+            DatasetInfo(
+                name=f.name,
+                path=str(f.resolve()),
+                rows=meta.get("rows"),
+                start=meta.get("start"),
+                end=meta.get("end"),
+                columns=meta.get("columns"),
+                symbol=symbol,
+                company_name=(manifest_meta or {}).get("company_name"),
+                display_name=display_name,
+                start_label=start_label,
+                end_label=end_label,
+                date_range_label=date_range_label,
+                downloaded_at=(manifest_meta or {}).get("downloaded_at"),
+            )
+        )
 
     files = sorted(files, key=lambda d: d.name.lower())
     return DatasetListResponse(datasets=files)
@@ -340,7 +459,13 @@ def dataset_preview(name: str, limit: int = 5) -> Dict[str, Any]:
 
     head = df.head(limit).to_dict(orient="records")
     tail = df.tail(limit).to_dict(orient="records")
-    return {"name": name, "head": head, "tail": tail}
+    return {
+        "name": name,
+        "head": head,
+        "tail": tail,
+        "total_rows": int(len(df)),
+        "columns": list(df.columns),
+    }
 
 
 @app.get("/runs")
@@ -366,3 +491,110 @@ def get_run(run_id: str) -> Dict[str, Any]:
         if record.get("run_id") == run_id:
             return record
     raise HTTPException(status_code=404, detail="Run not found")
+
+
+@app.post("/download-symbol")
+def download_symbol(
+    symbol: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    period: str = "max",
+    refresh: bool = False,
+) -> Dict[str, Any]:
+    """
+    Download historical data for a symbol from Yahoo Finance.
+
+    Args:
+        symbol: Ticker symbol (e.g., 'SPY', 'AAPL')
+        start_date: Start date in YYYY-MM-DD format (optional)
+        end_date: End date in YYYY-MM-DD format (optional)
+        period: Period to download if dates not specified (e.g., 'max', '5y', '1y')
+
+    Returns:
+        Download status and metadata
+    """
+    result = downloader.download_symbol(
+        symbol=symbol.upper(),
+        start_date=start_date,
+        end_date=end_date,
+        period=period,
+        refresh=refresh,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Download failed"))
+
+    return result
+
+
+@app.get("/symbol-info/{symbol}")
+def get_symbol_info(symbol: str) -> Dict[str, Any]:
+    """Get information about a symbol."""
+    result = downloader.get_symbol_info(symbol.upper())
+
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result.get("error", "Symbol not found"))
+
+    return result
+
+
+@app.get("/annotations")
+def get_annotations(dataset: str) -> AnnotationSet:
+    """
+    Get annotations for a dataset.
+
+    Args:
+        dataset: Dataset name (filename)
+
+    Returns:
+        AnnotationSet with all annotations
+    """
+    annotation_file = ANNOTATIONS_DIR / f"{dataset}.json"
+
+    if not annotation_file.exists():
+        return AnnotationSet(dataset_name=dataset, annotations=[])
+
+    try:
+        data = json.loads(annotation_file.read_text())
+        return AnnotationSet(**data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load annotations: {e}")
+
+
+@app.post("/annotations")
+def save_annotations(annotation_set: AnnotationSet) -> Dict[str, str]:
+    """
+    Save annotations for a dataset.
+
+    Args:
+        annotation_set: AnnotationSet to save
+
+    Returns:
+        Success message
+    """
+    annotation_file = ANNOTATIONS_DIR / f"{annotation_set.dataset_name}.json"
+
+    try:
+        annotation_file.write_text(annotation_set.model_dump_json(indent=2))
+        return {"status": "ok", "message": f"Saved {len(annotation_set.annotations)} annotations"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save annotations: {e}")
+
+
+@app.delete("/annotations")
+def delete_annotations(dataset: str) -> Dict[str, str]:
+    """
+    Delete all annotations for a dataset.
+
+    Args:
+        dataset: Dataset name
+
+    Returns:
+        Success message
+    """
+    annotation_file = ANNOTATIONS_DIR / f"{dataset}.json"
+
+    if annotation_file.exists():
+        annotation_file.unlink()
+
+    return {"status": "ok", "message": "Annotations deleted"}

@@ -24,5 +24,83 @@
     "start_param": null,
     "end_param": null,
     "period": "1y"
+  },
+  "NVDA_19990121-20251210.csv": {
+    "symbol": "NVDA",
+    "company_name": "NVIDIA Corporation",
+    "display_name": "NVIDIA Corporation (NVDA)",
+    "filename": "NVDA_19990121-20251210.csv",
+    "path": "/home/danyul/relay-trader/backend/data/NVDA_19990121-20251210.csv",
+    "rows": 6765,
+    "start": 916981200000,
+    "end": 1765429200000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "1999-01-21",
+    "end_date_label": "2025-12-10",
+    "date_range_label": "1999-01-21 \u2192 2025-12-10",
+    "downloaded_at": "2025-12-11T20:08:27.319504Z",
+    "request_key": "NVDA:max",
+    "start_param": null,
+    "end_param": null,
+    "period": "max"
+  },
+  "SPY_20241210-20251208.csv": {
+    "symbol": "SPY",
+    "company_name": "SPDR S&P 500 ETF",
+    "display_name": "SPDR S&P 500 ETF (SPY)",
+    "filename": "SPY_20241210-20251208.csv",
+    "path": "/home/danyul/relay-trader/backend/data/SPY_20241210-20251208.csv",
+    "rows": 249,
+    "start": 1733893200000,
+    "end": 1765256400000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "2024-12-10",
+    "end_date_label": "2025-12-08",
+    "date_range_label": "2024-12-10 \u2192 2025-12-08",
+    "downloaded_at": "2025-12-12T21:58:04.680640Z",
+    "request_key": "SPY:2024-12-11:2025-12-10",
+    "start_param": "2024-12-11",
+    "end_param": "2025-12-10",
+    "period": "max"
+  },
+  "BAC_20241217-20251217.csv": {
+    "symbol": "BAC",
+    "company_name": "Bank of America Corporation",
+    "display_name": "Bank of America Corporation (BAC)",
+    "filename": "BAC_20241217-20251217.csv",
+    "path": "/home/danyul/relay-trader/backend/data/BAC_20241217-20251217.csv",
+    "rows": 251,
+    "start": 1734498000000,
+    "end": 1766034000000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "2024-12-17",
+    "end_date_label": "2025-12-17",
+    "date_range_label": "2024-12-17 \u2192 2025-12-17",
+    "downloaded_at": "2025-12-18T19:56:41.463044Z",
+    "request_key": "BAC:1y",
+    "start_param": null,
+    "end_param": null,
+    "period": "1y"
   }
 }

@@ -12,3 +12,40 @@ html, body {
 body::-webkit-scrollbar {
   display: none;
 }
+
+/* Hide CodeMirror scrollbars */
+.cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.cm-scroller {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Hide select dropdown scrollbars */
+select.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+select.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Style select dropdown options */
+select option {
+  padding: 8px;
+}
+
+/* Hide scrollbar for elements with scrollbar-hide class */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

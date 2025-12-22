@@ -1,0 +1,16 @@
+<svg width="500" height="150" viewBox="0 0 500 150" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bell curve/normal distribution -->
+  <path d="M 20 120 Q 30 100, 40 80 Q 50 50, 60 35 Q 70 20, 80 15 Q 90 10, 100 15 Q 110 20, 120 35 Q 130 50, 140 80 Q 150 100, 160 120"
+        stroke="#ffffff"
+        stroke-width="3"
+        fill="none"/>
+
+  <!-- Bar chart - 3 bars of different heights -->
+  <rect x="50" y="80" width="20" height="40" fill="#ffffff"/>
+  <rect x="80" y="60" width="20" height="60" fill="#ffffff"/>
+  <rect x="110" y="70" width="20" height="50" fill="#ffffff"/>
+
+  <!-- PRIOR SYSTEMS text -->
+  <text x="180" y="70" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#ffffff">PRIOR</text>
+  <text x="180" y="110" font-family="Arial, sans-serif" font-size="28" font-weight="600" fill="#ffffff" letter-spacing="6">SYSTEMS</text>
+</svg>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -22,7 +22,7 @@ import {
   ScriptableContext,
 } from "chart.js";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { python } from "@codemirror/lang-python";
 import "@/utils/nativeDateAdapter";
 import ManualMode from "./ManualMode";
@@ -519,9 +519,9 @@ type StrategySelectProps = {
 function Collapse({ open, className = "", children }: CollapseProps) {
   return (
     <div
-      className={`transition-all duration-300 ${
+      className={`transition-all duration-200 ${
         open
-          ? "max-h-[1600px] opacity-100 translate-y-0 overflow-visible"
+          ? "max-h-screen opacity-100 translate-y-0 overflow-visible"
           : "max-h-0 opacity-0 -translate-y-1 overflow-hidden"
       }`}
     >
@@ -589,11 +589,11 @@ function StrategySelect({ options, value, onSelect, disabled }: StrategySelectPr
         </svg>
       </button>
       <div
-        className={`absolute left-0 right-0 top-[calc(100%+6px)] z-[9999] origin-top rounded-xl border border-gray-800/80 bg-gray-950/95 shadow-2xl backdrop-blur transition-all duration-200 ${
+        className={`absolute left-0 right-0 top-[calc(100%+6px)] z-[9999] origin-top rounded-xl border border-gray-800/80 bg-gray-950/95 shadow-2xl backdrop-blur transition-all duration-150 ${
           open ? "pointer-events-auto opacity-100 translate-y-0 scale-100" : "pointer-events-none opacity-0 -translate-y-2 scale-95"
         }`}
       >
-        <div className="max-h-64 overflow-y-auto py-2">
+        <div className="max-h-64 overflow-y-auto py-2 scrollbar-hide">
           {options.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-gray-500">No built-in strategies available.</div>
           ) : (
@@ -703,18 +703,22 @@ const PARAM_TOOLTIPS: Record<string, string> = {
   qty: "Position size in units/shares. Higher = more capital per trade.",
 };
 
-export default function Page() {
+function BacktestPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [strategyCode, setStrategyCode] = useState(DEFAULT_STRATEGY);
   const [symbol, setSymbol] = useState("AAPL");
   const [csvPath, setCsvPath] = useState("");
   const [initialCash, setInitialCash] = useState(100000);
-  const [maxBars, setMaxBars] = useState<number | undefined>(2000);
+  const [maxBars, setMaxBars] = useState<number | undefined>(undefined);
+  const [startBar, setStartBar] = useState<number | undefined>(undefined);
   const [commission, setCommission] = useState(0);
   const [slippageBps, setSlippageBps] = useState(0);
   const [initialCashInput, setInitialCashInput] = useState("100000");
   const [commissionInput, setCommissionInput] = useState("0");
   const [slippageInput, setSlippageInput] = useState("0");
+  const [portfolioEquity, setPortfolioEquity] = useState<number | null>(null);
+  const [usingPortfolio, setUsingPortfolio] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResponse | null>(null);
@@ -739,7 +743,7 @@ export default function Page() {
 
   useEffect(() => {
     setLayoutAnimating(true);
-    const timeout = window.setTimeout(() => setLayoutAnimating(false), 550);
+    const timeout = window.setTimeout(() => setLayoutAnimating(false), 250);
     return () => window.clearTimeout(timeout);
   }, [configCollapsed]);
 
@@ -824,11 +828,11 @@ export default function Page() {
     return () => window.clearTimeout(timer);
   }, [activeRunId]);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8001";
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
   const STORAGE_KEY = "priorsystems:backtest-form";
   const PRESET_STORAGE_KEY = "priorsystems:strategy-param-presets";
   const DATASET_STORAGE_KEY = "priorsystems:selected-dataset";
-  const chartIntroClass = chartsIntro ? "animate-chartIntro" : "";
+  const chartIntroClass = ""; // Disabled for performance
   const chartInstanceKey = activeRunId ?? "baseline";
 
   useEffect(() => {
@@ -877,6 +881,46 @@ export default function Page() {
       cancelled = true;
     };
   }, [apiBase, lockedDatasetName]);
+
+  const loadPortfolioEquity = useCallback(() => {
+    try {
+      const stored = localStorage.getItem("portfolio");
+      if (!stored) {
+        const confirmNav = confirm("No portfolio found. Would you like to create one now?");
+        if (confirmNav) {
+          router.push("/portfolio");
+        }
+        return;
+      }
+
+      const portfolio = JSON.parse(stored);
+      const holdings = portfolio.holdings || [];
+      const cash = portfolio.cash || 0;
+
+      // Calculate total holdings value - use currentValue if available, otherwise calculate from price
+      const totalHoldingsValue = holdings.reduce((sum: number, holding: any) => {
+        return sum + (holding.currentValue || holding.shares * holding.avgCost);
+      }, 0);
+
+      const totalEquity = cash + totalHoldingsValue;
+
+      setPortfolioEquity(totalEquity);
+      setInitialCash(totalEquity);
+      setInitialCashInput(totalEquity.toFixed(2));
+      setUsingPortfolio(true);
+    } catch (err) {
+      setError("Failed to load portfolio equity");
+      setTimeout(() => setError(null), 3000);
+    }
+  }, [router]);
+
+  // Auto-load portfolio equity if mode=portfolio
+  useEffect(() => {
+    const mode = searchParams.get('mode');
+    if (mode === 'portfolio') {
+      loadPortfolioEquity();
+    }
+  }, [searchParams, loadPortfolioEquity]);
 
   const applyFormSnapshot = useCallback(
     (form?: DiagnosticsInfo["form"]) => {
@@ -1366,6 +1410,7 @@ export default function Page() {
               initial_cash: initialCash,
               commission_per_trade: commission,
               slippage_bps: slippageBps,
+              start_bar: startBar ?? null,
               max_bars: maxBars ?? null,
               strategy_params: null,
             }
@@ -1378,6 +1423,7 @@ export default function Page() {
               initial_cash: initialCash,
               commission_per_trade: commission,
               slippage_bps: slippageBps,
+              start_bar: startBar ?? null,
               max_bars: maxBars ?? null,
               strategy_params: strategyParamsError ? null : strategyParamsObject,
             };
@@ -1588,13 +1634,12 @@ export default function Page() {
     maintainAspectRatio: false,
     layout: { padding: { top: 8, right: 8, bottom: 0, left: 0 } },
     animation: {
-      duration: 450,
-      easing: "easeOutCubic",
+      duration: 0, // Disable animations for better performance
     },
     transitions: {
       zoom: {
         animation: {
-          duration: 450,
+          duration: 150,
           easing: "easeOutCubic",
         },
       },
@@ -1640,10 +1685,11 @@ export default function Page() {
                 millisecond: "HH:mm:ss.SSS",
                 second: "HH:mm:ss",
                 minute: "HH:mm",
-                hour: "MMM d HH:mm",
-                day: "MMM d",
-                week: "MMM d",
+                hour: "MMM d, yyyy HH:mm",
+                day: "MMM d, yyyy",
+                week: "MMM d, yyyy",
                 month: "MMM yyyy",
+                year: "yyyy",
               },
             }
           : undefined,
@@ -1651,6 +1697,11 @@ export default function Page() {
           ? {
               color: "#94a3b8",
               maxRotation: 0,
+              callback: function(value: any) {
+                const date = new Date(value);
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+              },
             }
           : {
               color: "#94a3b8",
@@ -1910,10 +1961,9 @@ export default function Page() {
           {/* Top Navigation */}
           <header className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/60 px-6 py-4 backdrop-blur-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-gray-800/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                  Prior Systems
-                </div>
+              <div className="flex items-center gap-4">
+                <img src="/logo.svg" alt="Prior Systems" className="h-10 w-auto" />
+                <div className="h-8 w-px bg-gray-700"></div>
                 <h1 className="text-2xl font-bold tracking-tight text-gray-50">Backtest Console</h1>
               </div>
             </div>
@@ -1952,6 +2002,7 @@ export default function Page() {
               datasetName={lockedDataset.name}
               symbol={symbol}
               apiBase={apiBase}
+              initialCashOverride={usingPortfolio ? portfolioEquity ?? undefined : undefined}
             />
           )}
 
@@ -1967,22 +2018,20 @@ export default function Page() {
               {configCollapsed ? "Show Configuration" : "Hide Configuration"}
             </button>
           </div>
-          <div className="relative">
+          <div className="relative lg:flex lg:items-start lg:gap-6">
             {/* LEFT SIDEBAR - Configuration */}
             <div
-              className={`overflow-hidden transition-all duration-500 ${
+              className={`${
+                configCollapsed ? "max-h-0 overflow-hidden opacity-0" : "max-h-[4000px] opacity-100"
+              } transition-all duration-200 lg:max-h-none lg:overflow-visible lg:flex-shrink-0 lg:transition-[width,opacity] lg:duration-200 ${
                 configCollapsed
-                  ? "max-h-0 opacity-0 pointer-events-none"
-                  : "max-h-[4000px] opacity-100"
-              } lg:absolute lg:top-0 lg:left-0 lg:w-[360px] lg:max-h-none lg:overflow-visible lg:transition-transform lg:duration-500 ${
-                configCollapsed
-                  ? "lg:-translate-x-full lg:opacity-0 lg:pointer-events-none"
-                  : "lg:translate-x-0 lg:opacity-100 lg:pointer-events-auto"
+                  ? "lg:w-0 lg:opacity-0 lg:pointer-events-none"
+                  : "lg:w-[360px] lg:opacity-100 lg:pointer-events-auto"
               }`}
             >
               <form
                 onSubmit={handleSubmit}
-                className={`space-y-4 pb-2 transition-all duration-500 ${
+                className={`space-y-4 ${
                   configCollapsed ? "lg:pr-0" : "lg:pr-4"
                 }`}
               >
@@ -2124,7 +2173,7 @@ export default function Page() {
                         </button>
                       ))}
                     </div>
-                    <div className="rounded-xl border border-gray-800 bg-gray-950">
+                    <div className="rounded-xl border border-gray-800 bg-gray-950 scrollbar-hide">
                       <CodeEditor
                         value={strategyCode}
                         height="300px"
@@ -2228,38 +2277,60 @@ export default function Page() {
                     </button>
                     <Collapse open={showTradingParams} className="mt-4 space-y-3">
                       <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">Symbol</label>
-                          <input
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={symbol}
-                            onChange={(e) => setSymbol(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
+                        <div className="col-span-2">
+                          <label className="block text-xs text-gray-400 mb-1">
                             Initial Cash
                             <InfoIcon tooltip="Starting capital for the backtest. This is the total cash available to deploy." />
                           </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition focus:ring-2 ${
+                                usingPortfolio
+                                  ? "border-blue-600 bg-blue-950/30 focus:border-blue-500 focus:ring-blue-500/20"
+                                  : "border-gray-700 bg-gray-950 focus:border-white focus:ring-white/20"
+                              }`}
+                              value={initialCashInput}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
+                                setInitialCashInput(val);
+                                if (isIntermediateNumeric(val)) return;
+                                setInitialCash(Number(val));
+                                setUsingPortfolio(false);
+                              }}
+                              onBlur={() => {
+                                if (isIntermediateNumeric(initialCashInput)) {
+                                  const fallback = 0;
+                                  setInitialCash(fallback);
+                                  setInitialCashInput(String(fallback));
+                                }
+                              }}
+                            />
+                            {usingPortfolio && portfolioEquity !== null && (
+                              <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                                <span>✓</span>
+                                <span>Using portfolio equity: ${portfolioEquity.toLocaleString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">
+                            Start Bar
+                            <InfoIcon tooltip="Bar index to start the backtest from. Leave empty to start from the beginning. Useful for testing strategies on specific time periods." />
+                          </label>
                           <input
-                            type="text"
-                            inputMode="decimal"
+                            type="number"
                             className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={initialCashInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
-                              setInitialCashInput(val);
-                              if (isIntermediateNumeric(val)) return;
-                              setInitialCash(Number(val));
-                            }}
-                            onBlur={() => {
-                              if (isIntermediateNumeric(initialCashInput)) {
-                                const fallback = 0;
-                                setInitialCash(fallback);
-                                setInitialCashInput(String(fallback));
-                              }
-                            }}
+                            value={startBar ?? ""}
+                            onChange={(e) =>
+                              setStartBar(
+                                e.target.value === "" ? undefined : Number(e.target.value) || undefined,
+                              )
+                            }
+                            min="0"
                           />
                         </div>
                         <div>
@@ -2341,6 +2412,7 @@ export default function Page() {
                     loading ||
                     datasetLoading ||
                     !csvPath ||
+                    (mode === "builtin" && !builtinId) ||
                     (mode === "custom" && Boolean(strategyParamsError))
                   }
                   className="w-full rounded-xl bg-white py-3 text-sm font-bold text-black shadow-lg shadow-white/30 transition hover:bg-white disabled:opacity-50 disabled:hover:bg-white"
@@ -2371,11 +2443,7 @@ export default function Page() {
             </div>
 
             {/* RIGHT CONTENT AREA */}
-            <main
-              className={`mt-4 space-y-6 transition-[margin-left] duration-500 lg:mt-0 lg:min-w-0 ${
-                configCollapsed ? "lg:ml-0" : "lg:ml-[380px]"
-              }`}
-            >
+            <main className="mt-4 flex-1 space-y-6 transition-all duration-200 lg:mt-0 lg:min-w-0">
               {!result ? (
                 /* Empty State */
                 <div className="flex min-h-[600px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
@@ -2912,5 +2980,20 @@ export default function Page() {
         }
       `}</style>
     </>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-black">
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
+          <p className="text-gray-400">Loading backtest...</p>
+        </div>
+      </div>
+    }>
+      <BacktestPageContent />
+    </Suspense>
   );
 }

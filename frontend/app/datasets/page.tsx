@@ -140,7 +140,7 @@ export default function DatasetsPage() {
   const [queueRunning, setQueueRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8001";
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
 
   const selectedDatasetInfo = useMemo(
     () => datasets.find((dataset) => dataset.name === selectedDataset) || null,
@@ -425,10 +425,7 @@ export default function DatasetsPage() {
       <nav className="border-b border-gray-800/50 backdrop-blur-sm bg-gray-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <span className="text-black font-bold text-sm">PS</span>
-            </div>
-            <span className="text-xl font-semibold text-white">Prior Systems</span>
+            <img src="/logo.svg" alt="Prior Systems" className="h-12 w-auto" />
           </div>
           <button
             onClick={() => router.push("/")}

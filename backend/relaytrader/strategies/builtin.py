@@ -34,6 +34,7 @@ class MeanReversionZScore(Strategy):
         lookback = int(self.params.get("lookback", 50))
         entry = float(self.params.get("entry_z", 2.0))
         exit_z = float(self.params.get("exit_z", 0.5))
+        qty = float(self.params.get("qty", 1))
 
         z = self.zscore(bar.symbol, "close", lookback)
         if z is None:
@@ -43,7 +44,7 @@ class MeanReversionZScore(Strategy):
         if z > entry and pos > 0:
             self.sell(bar.symbol, pos, OrderType.MARKET)
         elif z < -entry and pos >= 0:
-            self.buy(bar.symbol, 1, OrderType.MARKET)
+            self.buy(bar.symbol, qty, OrderType.MARKET)
         elif abs(z) < exit_z and pos != 0:
             # flatten when reversion achieved
             if pos > 0:
@@ -60,6 +61,7 @@ class SmaCross(Strategy):
     def on_bar(self, bar: Bar) -> None:
         fast = int(self.params.get("fast", 10))
         slow = int(self.params.get("slow", 40))
+        qty = float(self.params.get("qty", 1))
         if fast >= slow:
             return
 
@@ -73,11 +75,11 @@ class SmaCross(Strategy):
         if fast_ma > slow_ma and pos <= 0:
             if pos < 0:
                 self.buy(bar.symbol, -pos, OrderType.MARKET)
-            self.buy(bar.symbol, 1, OrderType.MARKET)
+            self.buy(bar.symbol, qty, OrderType.MARKET)
         elif fast_ma < slow_ma and pos >= 0:
             if pos > 0:
                 self.sell(bar.symbol, pos, OrderType.MARKET)
-            self.sell(bar.symbol, 1, OrderType.MARKET)
+            self.sell(bar.symbol, qty, OrderType.MARKET)
 
 
 class RsiReversion(Strategy):
@@ -243,6 +245,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
           StrategyParam("lookback", "int", 50, min=10, max=200),
           StrategyParam("entry_z", "float", 2.0, min=0.5, max=5.0),
           StrategyParam("exit_z", "float", 0.5, min=0.0, max=2.0),
+          StrategyParam("qty", "float", 1.0, min=0.1, max=1000000),
         ],
         cls=MeanReversionZScore,
     ),
@@ -253,6 +256,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         params=[
           StrategyParam("fast", "int", 10, min=2, max=200),
           StrategyParam("slow", "int", 40, min=5, max=400),
+          StrategyParam("qty", "float", 1.0, min=0.1, max=1000000),
         ],
         cls=SmaCross,
     ),
@@ -304,7 +308,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         id="buy_and_hold",
         name="Buy & Hold",
         description="Purchase a fixed quantity on the first bar and hold.",
-        params=[StrategyParam("qty", "float", 1.0, min=0.1, max=100)],
+        params=[StrategyParam("qty", "float", 1.0, min=0.1, max=1000000)],
         cls=BuyAndHold,
     ),
 }

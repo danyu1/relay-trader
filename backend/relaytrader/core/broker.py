@@ -27,7 +27,8 @@ class Portfolio:
         for sym, pos in self.positions.items():
             px = prices.get(sym)
             if px is not None:
-                self.equity += pos.qty * px
+                position_value = pos.qty * px
+                self.equity += position_value
 
     def apply_fill(self, fill: Fill) -> None:
         symbol = fill.symbol
@@ -37,8 +38,12 @@ class Portfolio:
         before_qty = pos.qty
         pos.apply_fill(fill)
         #cash update
-        sign = 1 if fill.side == Side.SELL else -1
-        self.cash += sign * fill.qty * fill.price - fill.commission - fill.slippage
+        if fill.side == Side.BUY:
+            # When buying: decrease cash by (price * qty + fees)
+            self.cash -= fill.qty * fill.price + fill.commission + fill.slippage
+        else:
+            # When selling: increase cash by (price * qty - fees)
+            self.cash += fill.qty * fill.price - fill.commission - fill.slippage
         #iff position fully closed, you could drop it:
         if self.positions[symbol].qty == 0:
             # eep avg_price = 0 from Position.apply_fill
@@ -60,7 +65,7 @@ class SimpleBroker(BrokerContext):
         commission_per_trade: float = 0.0,
         slippage_bps: float = 0.0,
     ):
-        self.portfolio = Portfolio(cash=initial_cash)
+        self.portfolio = Portfolio(cash=initial_cash, equity=initial_cash)
         self.symbol = symbol
         self.commission_per_trade = commission_per_trade
         self.slippage_bps = slippage_bps

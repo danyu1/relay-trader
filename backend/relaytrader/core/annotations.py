@@ -6,6 +6,19 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class StockTradeAnnotation(BaseModel):
+    """Represents a single stock trade annotation."""
+
+    id: str = Field(..., description="Unique identifier for this annotation")
+    entryTimestamp: int = Field(..., description="Entry timestamp in milliseconds")
+    entryIndex: int = Field(..., description="Entry bar index")
+    exitTimestamp: Optional[int] = Field(None, description="Exit timestamp in milliseconds")
+    exitIndex: Optional[int] = Field(None, description="Exit bar index")
+    quantity: int = Field(..., description="Number of shares")
+    stopLoss: Optional[float] = Field(None, description="Stop loss price")
+    takeProfit: Optional[float] = Field(None, description="Take profit price")
+
+
 class TradeAnnotation(BaseModel):
     """Represents a single trade annotation (option position)."""
 

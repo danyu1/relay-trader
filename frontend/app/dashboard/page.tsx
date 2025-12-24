@@ -35,7 +35,7 @@ export default function DashboardPage() {
 
       {/* Service Cards */}
       <div className="max-w-7xl mx-auto px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
 
           {/* Data Suite Card */}
           <div className="group relative rounded-2xl border border-gray-800 bg-gradient-to-br from-gray-900 to-gray-950 p-8 hover:border-gray-700 transition-all">
@@ -90,7 +90,7 @@ export default function DashboardPage() {
               </div>
 
               <Link
-                href="/data-selection"
+                href="/data-selection?entry=dashboard"
                 className="block w-full px-6 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition text-center"
               >
                 Launch Backtester →
@@ -125,6 +125,37 @@ export default function DashboardPage() {
                 className="block w-full px-6 py-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold transition text-center"
               >
                 Build Portfolio →
+              </Link>
+            </div>
+          </div>
+
+          {/* Live Prices Card */}
+          <div className="group relative rounded-2xl border border-gray-800 bg-gradient-to-br from-gray-900 to-gray-950 p-8 hover:border-amber-600/50 transition-all">
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-orange-500/5 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
+
+            <div className="relative">
+              {/* Icon */}
+              <div className="w-16 h-16 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-6">
+                <svg className="w-8 h-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                </svg>
+              </div>
+
+              <h2 className="text-2xl font-bold mb-3">Live Prices</h2>
+              <p className="text-gray-400 text-sm mb-6">
+                Track your portfolio in real-time. Monitor stock prices, view historical performance, and analyze your holdings.
+              </p>
+
+              <div className="flex items-center gap-2 text-sm text-gray-400 mb-6">
+                <span className="px-2 py-1 rounded bg-amber-950 border border-amber-800 text-amber-400">Real-time</span>
+                <span className="px-2 py-1 rounded bg-orange-950 border border-orange-800 text-orange-400">Portfolio</span>
+              </div>
+
+              <Link
+                href="/live-prices"
+                className="block w-full px-6 py-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold transition text-center"
+              >
+                View Live Prices →
               </Link>
             </div>
           </div>

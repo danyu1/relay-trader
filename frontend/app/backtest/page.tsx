@@ -1,7 +1,7 @@
 "use client";
 
 import React, { ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Line } from "react-chartjs-2";
+import { Line, Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   LineElement,
@@ -20,6 +20,8 @@ import {
   ChartTypeRegistry,
   ScatterDataPoint,
   ScriptableContext,
+  BarElement,
+  BarController,
 } from "chart.js";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -27,18 +29,18 @@ import { python } from "@codemirror/lang-python";
 import "@/utils/nativeDateAdapter";
 import ManualMode from "./ManualMode";
 
-ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
+ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler, BarElement, BarController);
 
 const STRATEGY_TEMPLATES = [
   {
     id: "mean_reversion",
     label: "Mean Reversion Template",
-    code: `from relaytrader.core.strategy import Strategy\nfrom relaytrader.core.types import Bar, OrderType\n\n\nclass UserStrategy(Strategy):\n    def on_bar(self, bar: Bar):\n        lookback = self.params.get("lookback", 50)\n        entry_z = self.params.get("entry_z", 2.0)\n        exit_z = self.params.get("exit_z", 0.5)\n\n        z = self.zscore(bar.symbol, "close", lookback)\n        if z is None:\n            return\n\n        pos = self.context.get_position_qty(bar.symbol)\n\n        if z > entry_z and pos > 0:\n            self.sell(bar.symbol, pos, OrderType.MARKET)\n        elif z < -entry_z and pos >= 0:\n            self.buy(bar.symbol, 1, OrderType.MARKET)\n        elif abs(z) < exit_z and pos != 0:\n            if pos > 0:\n                self.sell(bar.symbol, pos, OrderType.MARKET)\n            else:\n                self.buy(bar.symbol, -pos, OrderType.MARKET)`,
+    code: `from relaytrader.core.strategy import Strategy\nfrom relaytrader.core.types import Bar, OrderType\n\n\nclass UserStrategy(Strategy):\n    """Mean reversion strategy using z-score with dynamic position sizing"""\n    \n    def on_bar(self, bar: Bar):\n        lookback = int(self.params.get("lookback", 50))\n        entry_z = float(self.params.get("entry_z", 2.0))\n        exit_z = float(self.params.get("exit_z", 0.5))\n        position_pct = float(self.params.get("position_pct", 100.0))\n\n        z = self.zscore(bar.symbol, "close", lookback)\n        if z is None:\n            return\n\n        # Calculate position size based on percentage of available capital\n        cash = self.context.get_cash()\n        max_position_value = cash * (position_pct / 100.0)\n        qty = int(max_position_value / bar.close) if bar.close > 0 else 0\n        if qty <= 0:\n            return\n\n        pos = self.context.get_position_qty(bar.symbol)\n\n        if z > entry_z and pos > 0:\n            self.sell(bar.symbol, pos, OrderType.MARKET)\n        elif z < -entry_z and pos >= 0:\n            self.buy(bar.symbol, qty, OrderType.MARKET)\n        elif abs(z) < exit_z and pos != 0:\n            if pos > 0:\n                self.sell(bar.symbol, pos, OrderType.MARKET)\n            else:\n                self.buy(bar.symbol, -pos, OrderType.MARKET)`,
   },
   {
     id: "sma_cross",
     label: "SMA Crossover Template",
-    code: `from relaytrader.core.strategy import Strategy\nfrom relaytrader.core.types import Bar, OrderType\n\n\nclass UserStrategy(Strategy):\n    def on_bar(self, bar: Bar):\n        fast = self.params.get("fast", 10)\n        slow = self.params.get("slow", 40)\n        if fast >= slow:\n            return\n\n        history = list(self.context.get_history(bar.symbol, "close", slow))\n        if len(history) < slow:\n            return\n\n        fast_ma = sum(history[-fast:]) / fast\n        slow_ma = sum(history) / slow\n        pos = self.context.get_position_qty(bar.symbol)\n\n        if fast_ma > slow_ma and pos <= 0:\n            if pos < 0:\n                self.buy(bar.symbol, -pos, OrderType.MARKET)\n            self.buy(bar.symbol, 1, OrderType.MARKET)\n        elif fast_ma < slow_ma and pos >= 0:\n            if pos > 0:\n                self.sell(bar.symbol, pos, OrderType.MARKET)\n            self.sell(bar.symbol, 1, OrderType.MARKET)`,
+    code: `from relaytrader.core.strategy import Strategy\nfrom relaytrader.core.types import Bar, OrderType\n\n\nclass UserStrategy(Strategy):\n    """SMA crossover strategy with dynamic position sizing"""\n    \n    def on_bar(self, bar: Bar):\n        fast = int(self.params.get("fast", 10))\n        slow = int(self.params.get("slow", 40))\n        position_pct = float(self.params.get("position_pct", 100.0))\n        \n        if fast >= slow:\n            return\n\n        history = list(self.context.get_history(bar.symbol, "close", slow))\n        if len(history) < slow:\n            return\n\n        fast_ma = sum(history[-fast:]) / fast\n        slow_ma = sum(history) / slow\n        \n        # Calculate position size based on percentage of available capital\n        cash = self.context.get_cash()\n        max_position_value = cash * (position_pct / 100.0)\n        qty = int(max_position_value / bar.close) if bar.close > 0 else 0\n        if qty <= 0:\n            return\n        \n        pos = self.context.get_position_qty(bar.symbol)\n\n        if fast_ma > slow_ma and pos <= 0:\n            if pos < 0:\n                self.buy(bar.symbol, -pos, OrderType.MARKET)\n            self.buy(bar.symbol, qty, OrderType.MARKET)\n        elif fast_ma < slow_ma and pos >= 0:\n            if pos > 0:\n                self.sell(bar.symbol, pos, OrderType.MARKET)\n            self.sell(bar.symbol, qty, OrderType.MARKET)`,
   },
 ];
 
@@ -65,7 +67,14 @@ const STRATEGY_PARAM_PRESETS: StrategyParamPreset[] = [
 
 const deriveSymbolFromName = (name: string | undefined) => {
   if (!name) return "";
+  // Remove file extension
   const base = name.split(".")[0] || name;
+  // Extract symbol from patterns like "RKLB_20201123-20251218" or "AAPL_daily"
+  const symbolMatch = base.match(/^([A-Za-z]+)(?:_|\-|$)/);
+  if (symbolMatch && symbolMatch[1]) {
+    return symbolMatch[1].toUpperCase();
+  }
+  // Fallback: return the whole base name
   return base.toUpperCase();
 };
 
@@ -442,6 +451,7 @@ type DiagnosticsInfo = {
     symbol?: string;
     csv_path?: string;
     initial_cash?: number;
+    start_bar?: number | null;
     max_bars?: number | null;
     commission_per_trade?: number;
     slippage_bps?: number;
@@ -479,6 +489,7 @@ type HistoryEntry = {
     symbol: string;
     csvPath: string;
     initialCash: number;
+    startBar?: number | null;
     maxBars: number | null;
     commission: number;
     slippageBps: number;
@@ -497,6 +508,20 @@ type DatasetInfo = {
   start?: number;
   end?: number;
   columns?: string[];
+};
+
+type DataSetProfile = {
+  id: string;
+  datasetName: string;
+  displayName: string;
+  startIndex: number;
+  endIndex: number;
+  startTimestamp: number;
+  endTimestamp: number;
+  startDate: string;
+  endDate: string;
+  initialEquity: number;
+  createdAt: string;
 };
 
 type BuiltinStrategy = {
@@ -664,6 +689,134 @@ function SecondaryMetricRow({ label, value, tooltip }: { label: string; value: s
   );
 }
 
+// Calculate advanced trade metrics
+function calculateAdvancedMetrics(trades: Trade[]) {
+  if (!trades || trades.length === 0) {
+    return {
+      profitFactor: 0,
+      expectancy: 0,
+      largestWin: 0,
+      largestLoss: 0,
+      consecutiveWins: 0,
+      consecutiveLosses: 0,
+      avgTradeDuration: 0,
+    };
+  }
+
+  const tradesWithPnL = trades.filter(t => t.realized_pnl !== undefined && t.realized_pnl !== null);
+  const winningTrades = tradesWithPnL.filter(t => (t.realized_pnl || 0) > 0);
+  const losingTrades = tradesWithPnL.filter(t => (t.realized_pnl || 0) < 0);
+
+  const grossProfit = winningTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
+  const grossLoss = Math.abs(losingTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0));
+
+  const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? Infinity : 0) : grossProfit / grossLoss;
+  const expectancy = tradesWithPnL.length > 0
+    ? tradesWithPnL.reduce((sum, t) => sum + (t.realized_pnl || 0), 0) / tradesWithPnL.length
+    : 0;
+
+  const largestWin = winningTrades.length > 0
+    ? Math.max(...winningTrades.map(t => t.realized_pnl || 0))
+    : 0;
+  const largestLoss = losingTrades.length > 0
+    ? Math.min(...losingTrades.map(t => t.realized_pnl || 0))
+    : 0;
+
+  // Calculate consecutive wins/losses
+  let maxConsecutiveWins = 0;
+  let maxConsecutiveLosses = 0;
+  let currentWinStreak = 0;
+  let currentLossStreak = 0;
+
+  tradesWithPnL.forEach(trade => {
+    const pnl = trade.realized_pnl || 0;
+    if (pnl > 0) {
+      currentWinStreak++;
+      currentLossStreak = 0;
+      maxConsecutiveWins = Math.max(maxConsecutiveWins, currentWinStreak);
+    } else if (pnl < 0) {
+      currentLossStreak++;
+      currentWinStreak = 0;
+      maxConsecutiveLosses = Math.max(maxConsecutiveLosses, currentLossStreak);
+    }
+  });
+
+  return {
+    profitFactor,
+    expectancy,
+    largestWin,
+    largestLoss,
+    consecutiveWins: maxConsecutiveWins,
+    consecutiveLosses: maxConsecutiveLosses,
+  };
+}
+
+// Calculate drawdown statistics
+function calculateDrawdownStats(equityCurve: number[]) {
+  if (!equityCurve || equityCurve.length === 0) {
+    return { maxDrawdownDuration: 0, avgDrawdownDuration: 0, recoveryTime: 0 };
+  }
+
+  let peak = equityCurve[0];
+  let maxDrawdownDuration = 0;
+  let currentDrawdownStart = -1;
+  const drawdownDurations: number[] = [];
+  let maxDrawdownEnd = 0;
+  let maxDrawdownPeak = 0;
+
+  equityCurve.forEach((equity, i) => {
+    if (equity > peak) {
+      // New peak - end any drawdown
+      if (currentDrawdownStart >= 0) {
+        const duration = i - currentDrawdownStart;
+        drawdownDurations.push(duration);
+        maxDrawdownDuration = Math.max(maxDrawdownDuration, duration);
+        currentDrawdownStart = -1;
+      }
+      peak = equity;
+    } else if (equity < peak && currentDrawdownStart < 0) {
+      // Start of drawdown
+      currentDrawdownStart = i;
+
+      // Check if this is the max drawdown
+      const drawdown = (equity - peak) / peak;
+      const maxDD = Math.min(...equityCurve.slice(0, i + 1).map((e, idx) => {
+        const p = Math.max(...equityCurve.slice(0, idx + 1));
+        return (e - p) / p;
+      }));
+
+      if (Math.abs(drawdown) >= Math.abs(maxDD) * 0.99) {
+        maxDrawdownPeak = i;
+      }
+    }
+  });
+
+  // Find recovery time for max drawdown
+  let recoveryTime = 0;
+  if (maxDrawdownPeak > 0) {
+    const peakValue = Math.max(...equityCurve.slice(0, maxDrawdownPeak + 1));
+    for (let i = maxDrawdownPeak + 1; i < equityCurve.length; i++) {
+      if (equityCurve[i] >= peakValue) {
+        recoveryTime = i - maxDrawdownPeak;
+        break;
+      }
+    }
+    if (recoveryTime === 0 && maxDrawdownPeak < equityCurve.length - 1) {
+      recoveryTime = equityCurve.length - maxDrawdownPeak; // Still in drawdown
+    }
+  }
+
+  const avgDrawdownDuration = drawdownDurations.length > 0
+    ? drawdownDurations.reduce((sum, d) => sum + d, 0) / drawdownDurations.length
+    : 0;
+
+  return {
+    maxDrawdownDuration,
+    avgDrawdownDuration,
+    recoveryTime,
+  };
+}
+
 function InfoIcon({ tooltip }: { tooltip: string }) {
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -700,7 +853,8 @@ const PARAM_TOOLTIPS: Record<string, string> = {
   overbought: "RSI level considered overbought. Above this triggers sell signal. Standard is 70.",
   num_std: "Number of standard deviations for Bollinger Bands. Higher = wider bands, fewer signals.",
   threshold: "Minimum percentage change to trigger momentum signal. Higher = only trade strong moves.",
-  qty: "Position size in units/shares. Higher = more capital per trade.",
+  position_pct: "Percentage of available capital to use per trade. 100% = use all available capital (compounding). Lower values for risk management.",
+  qty: "Fixed position size in units/shares. Ignored if position_pct is less than 100%.",
 };
 
 function BacktestPageContent() {
@@ -714,6 +868,7 @@ function BacktestPageContent() {
   const [startBar, setStartBar] = useState<number | undefined>(undefined);
   const [commission, setCommission] = useState(0);
   const [slippageBps, setSlippageBps] = useState(0);
+  const [quantity, setQuantity] = useState(100);
   const [initialCashInput, setInitialCashInput] = useState("100000");
   const [commissionInput, setCommissionInput] = useState("0");
   const [slippageInput, setSlippageInput] = useState("0");
@@ -726,6 +881,7 @@ function BacktestPageContent() {
   const [lockedDataset, setLockedDataset] = useState<DatasetInfo | null>(null);
   const [datasetLoading, setDatasetLoading] = useState(true);
   const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [datasetPrice, setDatasetPrice] = useState<number | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [serverRuns, setServerRuns] = useState<ServerRunSummary[]>([]);
   const [serverRunsLoading, setServerRunsLoading] = useState(false);
@@ -740,6 +896,11 @@ function BacktestPageContent() {
   const [builtinParamInputs, setBuiltinParamInputs] = useState<Record<string, string>>({});
   const [configCollapsed, setConfigCollapsed] = useState(false);
   const [layoutAnimating, setLayoutAnimating] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<DataSetProfile | null>(null);
+  const [editorExpanded, setEditorExpanded] = useState(false);
+  const [showDatasetInfo, setShowDatasetInfo] = useState(false);
+  const [showMechanicalGuide, setShowMechanicalGuide] = useState(true);
+  const [showManualGuide, setShowManualGuide] = useState(true);
 
   useEffect(() => {
     setLayoutAnimating(true);
@@ -796,7 +957,7 @@ function BacktestPageContent() {
   const [chartAnimationKey, setChartAnimationKey] = useState(0);
   const [chartsIntro, setChartsIntro] = useState(true);
   const [showMoreMetrics, setShowMoreMetrics] = useState(false);
-  const [showTradingParams, setShowTradingParams] = useState(false);
+  const [showTradingParams, setShowTradingParams] = useState(true);
 
   useEffect(() => {
     setInitialCashInput(String(initialCash));
@@ -832,19 +993,64 @@ function BacktestPageContent() {
   const STORAGE_KEY = "priorsystems:backtest-form";
   const PRESET_STORAGE_KEY = "priorsystems:strategy-param-presets";
   const DATASET_STORAGE_KEY = "priorsystems:selected-dataset";
+  const PROFILE_STORAGE_KEY = "priorsystems:active-profile";
   const chartIntroClass = ""; // Disabled for performance
   const chartInstanceKey = activeRunId ?? "baseline";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(DATASET_STORAGE_KEY);
-    if (stored) {
-      setLockedDatasetName(stored);
+    const storedDataset = window.localStorage.getItem(DATASET_STORAGE_KEY);
+    const storedProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (storedProfile) {
+      try {
+        const parsed = JSON.parse(storedProfile) as DataSetProfile;
+        if (
+          parsed?.datasetName &&
+          Number.isFinite(parsed.startIndex) &&
+          Number.isFinite(parsed.endIndex)
+        ) {
+          if (storedDataset && storedDataset !== parsed.datasetName) {
+            throw new Error("Profile dataset does not match selected dataset");
+          }
+          setActiveProfile(parsed);
+          setLockedDatasetName(parsed.datasetName);
+          setStartBar(parsed.startIndex);
+          const rangeBars = parsed.endIndex - parsed.startIndex + 1;
+          if (Number.isFinite(rangeBars) && rangeBars > 0) {
+            setMaxBars(rangeBars);
+          }
+          if (typeof parsed.initialEquity === "number" && Number.isFinite(parsed.initialEquity)) {
+            setInitialCash(parsed.initialEquity);
+          }
+          return;
+        }
+      } catch {
+        // ignore invalid profile data
+      }
+    }
+    if (storedDataset) {
+      setLockedDatasetName(storedDataset);
     } else {
       setDatasetLoading(false);
       setDatasetError("Select a dataset first.");
     }
+  }, [DATASET_STORAGE_KEY, PROFILE_STORAGE_KEY]);
+
+  // Load and persist trading mode
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Load on mount
+    const saved = window.localStorage.getItem("priorsystems:trading-mode");
+    if (saved === "manual" || saved === "mechanical") {
+      setTradingMode(saved);
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Save on change
+    window.localStorage.setItem("priorsystems:trading-mode", tradingMode);
+  }, [tradingMode]);
 
   useEffect(() => {
     if (!lockedDatasetName) return;
@@ -866,7 +1072,28 @@ function BacktestPageContent() {
         if (cancelled) return;
         setLockedDataset(match);
         setCsvPath(match.path);
-        setSymbol((prev) => (prev && prev !== "AAPL" ? prev : deriveSymbolFromName(match.name)));
+        // Always update symbol to match the loaded dataset
+        const derivedSymbol = deriveSymbolFromName(match.name);
+        if (derivedSymbol) {
+          setSymbol(derivedSymbol);
+        }
+
+        // Fetch first price from dataset
+        try {
+          const previewRes = await fetch(`${apiBase}/dataset-preview?name=${encodeURIComponent(match.name)}&limit=1`);
+          if (previewRes.ok) {
+            const previewData = await previewRes.json();
+            if (previewData.head && previewData.head.length > 0) {
+              const firstRow = previewData.head[0];
+              const price = firstRow.close || firstRow.Close || null;
+              if (price && !cancelled) {
+                setDatasetPrice(typeof price === 'number' ? price : Number(price));
+              }
+            }
+          }
+        } catch (priceErr) {
+          console.warn("Failed to fetch dataset price:", priceErr);
+        }
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Failed to load selected dataset";
@@ -928,6 +1155,9 @@ function BacktestPageContent() {
       if (form.symbol) setSymbol(form.symbol);
       if (form.csv_path) setCsvPath(form.csv_path);
       if (typeof form.initial_cash === "number") setInitialCash(form.initial_cash);
+      if (typeof form.start_bar === "number" || form.start_bar === null) {
+        setStartBar(form.start_bar ?? undefined);
+      }
       if (typeof form.max_bars === "number" || form.max_bars === null) {
         setMaxBars(form.max_bars ?? undefined);
       }
@@ -970,9 +1200,27 @@ function BacktestPageContent() {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
+
+      // Check if there's an active profile with initialEquity - if so, don't override it
+      const storedProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+      let hasProfileEquity = false;
+      if (storedProfile) {
+        try {
+          const parsed = JSON.parse(storedProfile);
+          if (typeof parsed.initialEquity === "number" && Number.isFinite(parsed.initialEquity)) {
+            hasProfileEquity = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       if (saved.symbol) setSymbol(saved.symbol);
       if (saved.csvPath) setCsvPath(saved.csvPath);
-      if (typeof saved.initialCash === "number") setInitialCash(saved.initialCash);
+      // Only load initialCash from storage if there's no active profile equity
+      if (typeof saved.initialCash === "number" && !hasProfileEquity) {
+        setInitialCash(saved.initialCash);
+      }
       if (typeof saved.maxBars === "number" || saved.maxBars === null) {
         setMaxBars(saved.maxBars ?? undefined);
       }
@@ -998,7 +1246,7 @@ function BacktestPageContent() {
     } catch (e) {
       console.warn("Failed to load saved config", e);
     }
-  }, [applyBuiltinParamState]);
+  }, [applyBuiltinParamState, PROFILE_STORAGE_KEY]);
 
   useEffect(() => {
     if (!strategyParamsRaw.trim()) {
@@ -1392,7 +1640,7 @@ function BacktestPageContent() {
     }
 
     if (!csvPath) {
-      setError("Select a dataset on the datasets page before running a backtest.");
+      setError("Select a dataset on the data selection page before running a backtest.");
       setLoading(false);
       return;
     }
@@ -1402,7 +1650,7 @@ function BacktestPageContent() {
         mode === "builtin"
           ? {
               builtin_strategy_id: builtinId,
-              builtin_params: builtinParams,
+              builtin_params: { ...builtinParams, qty: quantity },
               strategy_code: null,
               strategy_class_name: "",
               csv_path: csvPath,
@@ -1440,6 +1688,20 @@ function BacktestPageContent() {
       }
 
       const json = (await res.json()) as BacktestResponse;
+
+      // Debug: Log actual timestamp range
+      if (json.timestamps && json.timestamps.length > 0) {
+        const firstTs = json.timestamps[0];
+        const lastTs = json.timestamps[json.timestamps.length - 1];
+        console.log('[Backtest] Timestamp range:', {
+          first: new Date(firstTs).toISOString(),
+          last: new Date(lastTs).toISOString(),
+          numBars: json.timestamps.length,
+          requestedStartBar: startBar,
+          requestedMaxBars: maxBars
+        });
+      }
+
       setResult(json);
       const entry: HistoryEntry = {
         savedAt: new Date().toISOString(),
@@ -1448,6 +1710,7 @@ function BacktestPageContent() {
           symbol,
           csvPath,
           initialCash,
+          startBar: startBar ?? null,
           maxBars: maxBars ?? null,
           commission,
           slippageBps,
@@ -1734,6 +1997,88 @@ function BacktestPageContent() {
     },
   };
 
+  // Cumulative P&L Chart Options
+  const cumulativePnLOptions: LineChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        mode: "index",
+        intersect: false,
+        backgroundColor: "rgba(0,0,0,0.9)",
+        titleColor: "#fff",
+        bodyColor: "#fff",
+        borderColor: "#8b5cf6",
+        borderWidth: 1,
+        callbacks: {
+          label: (ctx) => {
+            const y = ctx.parsed.y;
+            return `P&L: $${y !== null ? y.toFixed(2) : '0.00'}`;
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: "#9ca3af", maxTicksLimit: 10 },
+      },
+      y: {
+        grid: { color: "rgba(255,255,255,0.05)" },
+        ticks: {
+          color: "#9ca3af",
+          callback: (value) => `$${value}`,
+        },
+      },
+    },
+  };
+
+  // Trade Distribution Histogram Options
+  const histogramOptions: ChartOptions<"bar"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        mode: "index",
+        intersect: false,
+        backgroundColor: "rgba(0,0,0,0.9)",
+        titleColor: "#fff",
+        bodyColor: "#fff",
+        borderColor: "#8b5cf6",
+        borderWidth: 1,
+        callbacks: {
+          title: (items) => items[0]?.label || "",
+          label: (ctx) => `Count: ${ctx.parsed.y} trades`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          color: "#9ca3af",
+          maxRotation: 45,
+          minRotation: 45,
+          font: { size: 10 },
+        },
+      },
+      y: {
+        grid: { color: "rgba(255,255,255,0.05)" },
+        ticks: {
+          color: "#9ca3af",
+          stepSize: 1,
+        },
+        title: {
+          display: true,
+          text: "Trade Count",
+          color: "#9ca3af",
+        },
+      },
+    },
+  };
+
   const buildSeriesPoints = (series: number[], timeAxis: number[]) =>
     series.map((value, idx) => ({
       x: timeAxis[idx],
@@ -1887,6 +2232,92 @@ function BacktestPageContent() {
         }
       : null;
 
+  // Cumulative P&L Chart Data
+  const cumulativePnLData: MixedLineData | null = useMemo(() => {
+    if (!result || !result.trades || result.trades.length === 0) return null;
+
+    const tradesWithPnL = result.trades.filter(t => t.realized_pnl !== undefined && t.realized_pnl !== null);
+    if (tradesWithPnL.length === 0) return null;
+
+    let cumulativePnL = 0;
+    const points = tradesWithPnL.map((trade, idx) => {
+      cumulativePnL += trade.realized_pnl || 0;
+      return {
+        x: idx,
+        y: cumulativePnL,
+      };
+    });
+
+    return {
+      labels: tradesWithPnL.map((_, idx) => `Trade ${idx + 1}`),
+      datasets: [
+        {
+          label: "Cumulative P&L ($)",
+          data: points,
+          parsing: false,
+          borderWidth: 2,
+          borderColor: "#8b5cf6",
+          fill: true,
+          backgroundColor: (ctx) => gradientFill(ctx, "rgba(139,92,246,0.25)", "rgba(139,92,246,0.05)"),
+          tension: 0.1,
+          pointRadius: 0,
+          pointHitRadius: 6,
+        },
+      ],
+    };
+  }, [result]);
+
+  // Trade Distribution Histogram Data
+  const tradeDistributionData = useMemo(() => {
+    if (!result || !result.trades || result.trades.length === 0) return null;
+
+    const tradesWithPnL = result.trades.filter(t => t.realized_pnl !== undefined && t.realized_pnl !== null);
+    if (tradesWithPnL.length === 0) return null;
+
+    // Create histogram bins
+    const pnlValues = tradesWithPnL.map(t => t.realized_pnl || 0);
+    const minPnL = Math.min(...pnlValues);
+    const maxPnL = Math.max(...pnlValues);
+    const binCount = Math.min(20, Math.ceil(Math.sqrt(pnlValues.length)));
+    const binSize = (maxPnL - minPnL) / binCount;
+
+    const bins: number[] = new Array(binCount).fill(0);
+    const binLabels: string[] = [];
+
+    for (let i = 0; i < binCount; i++) {
+      const binStart = minPnL + i * binSize;
+      const binEnd = binStart + binSize;
+      binLabels.push(`$${binStart.toFixed(0)} to $${binEnd.toFixed(0)}`);
+
+      pnlValues.forEach(pnl => {
+        if (i === binCount - 1) {
+          if (pnl >= binStart && pnl <= binEnd) bins[i]++;
+        } else {
+          if (pnl >= binStart && pnl < binEnd) bins[i]++;
+        }
+      });
+    }
+
+    return {
+      labels: binLabels,
+      datasets: [
+        {
+          label: "Trade Count",
+          data: bins,
+          backgroundColor: bins.map((_, idx) => {
+            const binMidpoint = minPnL + (idx + 0.5) * binSize;
+            return binMidpoint >= 0 ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)";
+          }),
+          borderColor: bins.map((_, idx) => {
+            const binMidpoint = minPnL + (idx + 0.5) * binSize;
+            return binMidpoint >= 0 ? "rgba(34,197,94,1)" : "rgba(239,68,68,1)";
+          }),
+          borderWidth: 1,
+        },
+      ],
+    };
+  }, [result]);
+
   const valueToIndex = useCallback(
     (value: number) => {
       if (!timeline.length) return 0;
@@ -1957,43 +2388,41 @@ function BacktestPageContent() {
   return (
     <>
       <main className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-gray-100">
-        <div className="mx-auto max-w-[1920px] px-4 py-6 lg:px-8">
-          {/* Top Navigation */}
-          <header className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/60 px-6 py-4 backdrop-blur-sm">
+        <div className="mx-auto max-w-[1920px] px-4 py-3 lg:px-8">
+          {/* Compact Top Navigation with Mode Toggle */}
+          <header className="mb-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5 backdrop-blur-sm">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <img src="/logo.svg" alt="Prior Systems" className="h-10 w-auto" />
-                <div className="h-8 w-px bg-gray-700"></div>
-                <h1 className="text-2xl font-bold tracking-tight text-gray-50">Backtest Console</h1>
+              <div className="flex items-center gap-3">
+                <img src="/logo.svg" alt="Prior Systems" className="h-7 w-auto" />
+                <div className="h-6 w-px bg-gray-700"></div>
+                <h1 className="text-lg font-bold tracking-tight text-gray-50">Backtest Console</h1>
+              </div>
+
+              {/* Trading Mode Toggle - Inline with Header */}
+              <div className="inline-flex rounded-lg border border-gray-800 bg-gray-900/60 p-0.5">
+                <button
+                  onClick={() => setTradingMode("mechanical")}
+                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
+                    tradingMode === "mechanical"
+                      ? "bg-white text-black"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Mechanical
+                </button>
+                <button
+                  onClick={() => setTradingMode("manual")}
+                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
+                    tradingMode === "manual"
+                      ? "bg-white text-black"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Fundamental
+                </button>
               </div>
             </div>
           </header>
-
-          {/* Trading Mode Toggle */}
-          <div className="mb-6 flex justify-center">
-            <div className="inline-flex rounded-lg border border-gray-800 bg-gray-900/60 p-1">
-              <button
-                onClick={() => setTradingMode("mechanical")}
-                className={`rounded-md px-6 py-2 text-sm font-semibold transition ${
-                  tradingMode === "mechanical"
-                    ? "bg-white text-black"
-                    : "text-gray-400 hover:text-white"
-                }`}
-              >
-                Mechanical
-              </button>
-              <button
-                onClick={() => setTradingMode("manual")}
-                className={`rounded-md px-6 py-2 text-sm font-semibold transition ${
-                  tradingMode === "manual"
-                    ? "bg-white text-black"
-                    : "text-gray-400 hover:text-white"
-                }`}
-              >
-                Fundamental
-              </button>
-            </div>
-          </div>
 
           {/* Manual Mode */}
           {tradingMode === "manual" && lockedDataset && (
@@ -2002,18 +2431,22 @@ function BacktestPageContent() {
               datasetName={lockedDataset.name}
               symbol={symbol}
               apiBase={apiBase}
-              initialCashOverride={usingPortfolio ? portfolioEquity ?? undefined : undefined}
+              startBar={startBar}
+              maxBars={maxBars}
+              initialCashOverride={usingPortfolio ? portfolioEquity ?? undefined : initialCash}
+              showGuide={showManualGuide}
+              setShowGuide={setShowManualGuide}
             />
           )}
 
           {/* Mechanical Mode - Main Layout: Sidebar + Content */}
           {tradingMode === "mechanical" && (
           <>
-          <div className="mb-4 flex justify-end">
+          <div className="mb-2 flex justify-end">
             <button
               type="button"
               onClick={() => setConfigCollapsed((prev) => !prev)}
-              className="rounded-lg border border-gray-700 px-4 py-2 text-xs font-semibold text-gray-300 transition hover:border-white hover:text-white"
+              className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white hover:text-white"
             >
               {configCollapsed ? "Show Configuration" : "Hide Configuration"}
             </button>
@@ -2031,35 +2464,78 @@ function BacktestPageContent() {
             >
               <form
                 onSubmit={handleSubmit}
-                className={`space-y-4 ${
+                className={`space-y-3 ${
                   configCollapsed ? "lg:pr-0" : "lg:pr-4"
                 }`}
               >
-                {/* Dataset Summary */}
-                <section className="rounded-xl border border-gray-800 bg-gray-900/80 p-4 shadow-xl backdrop-blur-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-200">Dataset</h3>
-                      {datasetLoading ? (
-                        <p className="mt-1 text-xs text-gray-500">Loading selected dataset…</p>
-                      ) : lockedDataset ? (
-                        <p className="mt-1 text-xs text-gray-400">{lockedDataset.name}</p>
-                      ) : (
-                        <p className="mt-1 text-xs text-rose-400">
-                          {datasetError ?? "No dataset selected. Choose one before running backtests."}
-                        </p>
-                      )}
+                {/* How to Use Mechanical Mode Guide - Moved to Top */}
+                {showMechanicalGuide && (
+                  <div className="rounded-xl border border-blue-800 bg-blue-950/30 p-3">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <h3 className="text-xs font-bold text-blue-300">How to Use Mechanical Mode</h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowMechanicalGuide(false)}
+                        className="text-blue-400 hover:text-white transition text-base leading-none"
+                        title="Dismiss guide"
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-200 transition hover:border-white hover:text-white"
-                      onClick={() => router.push("/datasets")}
-                    >
-                      Change
-                    </button>
+                    <ol className="space-y-1 text-[10px] text-blue-200 leading-relaxed">
+                      <li><span className="font-semibold">1.</span> Select dataset → Choose strategy → Configure parameters</li>
+                      <li><span className="font-semibold">2.</span> Set trading parameters (quantity, commission, slippage)</li>
+                      <li><span className="font-semibold">3.</span> Click "Run Backtest" and review results below</li>
+                    </ol>
+                  </div>
+                )}
+
+                {/* Dataset Summary */}
+                <section className="rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm overflow-hidden">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-200">Dataset</h3>
+                        {datasetLoading ? (
+                          <p className="mt-1 text-xs text-gray-500">Loading selected dataset…</p>
+                        ) : lockedDataset ? (
+                          <p className="mt-1 text-xs text-gray-400">{lockedDataset.name}</p>
+                        ) : (
+                          <p className="mt-1 text-xs text-rose-400">
+                            {datasetError ?? "No dataset selected. Choose one before running backtests."}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      {lockedDataset && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDatasetInfo(!showDatasetInfo)}
+                          className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-200 transition hover:border-white hover:text-white"
+                        >
+                          {showDatasetInfo ? "Hide" : "Info"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-200 transition hover:border-white hover:text-white"
+                        onClick={() => router.push("/data-selection")}
+                      >
+                        Change
+                      </button>
+                    </div>
                   </div>
                   {lockedDataset && (
-                    <div className="mt-4 space-y-2 text-xs text-gray-300">
+                    <div
+                      className={`grid transition-all duration-300 ease-in-out ${
+                        showDatasetInfo
+                          ? "grid-rows-[1fr] opacity-100 mt-4"
+                          : "grid-rows-[0fr] opacity-0"
+                      }`}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="space-y-2 text-xs text-gray-300">
                       <div className="flex items-center justify-between">
                         <span className="text-gray-500">Symbol</span>
                         <span className="font-semibold">
@@ -2071,31 +2547,260 @@ function BacktestPageContent() {
                         <span>{lockedDataset.rows ?? "—"}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Range</span>
+                        <span className="text-gray-500">
+                          {activeProfile ? "Selected Range" : "Dataset Range"}
+                        </span>
                         <span>
-                          {formatTimestamp(lockedDataset.start)} → {formatTimestamp(lockedDataset.end)}
+                          {activeProfile
+                            ? `${activeProfile.startDate || formatTimestamp(activeProfile.startTimestamp)} → ${
+                                activeProfile.endDate || formatTimestamp(activeProfile.endTimestamp)
+                              }`
+                            : `${formatTimestamp(lockedDataset.start)} → ${formatTimestamp(lockedDataset.end)}`}
                         </span>
                       </div>
+                      {activeProfile && startBar !== undefined && maxBars !== undefined && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-500">Backtest Range</span>
+                          <span className="font-mono text-[11px]">
+                            Bar {startBar} to {startBar + maxBars - 1} ({maxBars} bars)
+                          </span>
+                        </div>
+                      )}
                       <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-2 font-mono text-[11px] text-gray-400 break-all">
                         {lockedDataset.path}
+                      </div>
+                        </div>
                       </div>
                     </div>
                   )}
                   {!datasetLoading && !lockedDataset && (
                     <p className="mt-3 text-[11px] text-gray-400">
-                      Please choose a dataset on the datasets page to unlock the backtest console.
+                      Please choose a dataset on the data selection page to unlock the backtest console.
                     </p>
                   )}
                 </section>
 
+                {/* Trading Parameters - Collapsible */}
+                <section className="relative z-10 rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => setShowTradingParams(!showTradingParams)}
+                    className="flex w-full items-center justify-between text-xs font-semibold text-gray-200"
+                  >
+                    <span>Trading Parameters</span>
+                    <span className="text-gray-500">{showTradingParams ? "−" : "+"}</span>
+                  </button>
+                  <Collapse open={showTradingParams} className="mt-3 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">
+                          Initial Cash
+                          <InfoIcon tooltip="Starting capital for the backtest. This is the total cash available to deploy." />
+                          {activeProfile && (
+                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                          )}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={activeProfile !== null}
+                            className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
+                              activeProfile
+                                ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
+                                : usingPortfolio
+                                ? "border-blue-600 bg-blue-950/30 focus:border-blue-500 focus:ring-blue-500/20 focus:ring-2"
+                                : "border-gray-700 bg-gray-950 focus:border-white focus:ring-white/20 focus:ring-2"
+                            }`}
+                            value={initialCashInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
+                              setInitialCashInput(val);
+                              if (isIntermediateNumeric(val)) return;
+                              setInitialCash(Number(val));
+                              setUsingPortfolio(false);
+                            }}
+                            onBlur={() => {
+                              if (isIntermediateNumeric(initialCashInput)) {
+                                const fallback = 0;
+                                setInitialCash(fallback);
+                                setInitialCashInput(String(fallback));
+                              }
+                            }}
+                          />
+                          {usingPortfolio && portfolioEquity !== null && (
+                            <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                              <span>✓</span>
+                              <span>Using portfolio equity: ${portfolioEquity.toLocaleString()}</span>
+                            </div>
+                          )}
+                          {activeProfile && (
+                            <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                              <span>✓</span>
+                              <span>Initial equity from profile: ${activeProfile.initialEquity.toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Shares per Trade
+                          <InfoIcon tooltip="Number of shares to buy/sell in each trade. The strategy will use this quantity for position sizing." />
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          value={quantity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 1;
+                            setQuantity(val);
+                          }}
+                        />
+                        {lockedDataset && datasetPrice !== null && (
+                          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
+                              <div className="text-gray-500">Price/Share</div>
+                              <div className="text-white font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
+                            </div>
+                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
+                              <div className="text-gray-500">Position Cost</div>
+                              <div className="text-white font-mono mt-0.5">${(datasetPrice * quantity).toFixed(2)}</div>
+                            </div>
+                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
+                              <div className="text-gray-500">Max Shares</div>
+                              <div className="text-green-400 font-mono mt-0.5">{Math.floor(initialCash / datasetPrice)}</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Start Bar
+                          <InfoIcon tooltip="Bar index to start the backtest from. Set in data-selection page." />
+                          {activeProfile && (
+                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          disabled={activeProfile !== null}
+                          className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
+                            activeProfile
+                              ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
+                              : "border-gray-700 bg-gray-950 focus:border-white focus:ring-2 focus:ring-white/20"
+                          }`}
+                          value={startBar ?? ""}
+                          onChange={(e) =>
+                            setStartBar(
+                              e.target.value === "" ? undefined : Number(e.target.value) || undefined,
+                            )
+                          }
+                          min="0"
+                        />
+                        {activeProfile && startBar !== undefined && (
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                            <span>✓</span>
+                            <span>Start bar from profile: {startBar}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Max Bars
+                          <InfoIcon tooltip="Number of bars in the selected range. Set in data-selection page." />
+                          {activeProfile && (
+                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          disabled={activeProfile !== null}
+                          className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
+                            activeProfile
+                              ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
+                              : "border-gray-700 bg-gray-950 focus:border-white focus:ring-2 focus:ring-white/20"
+                          }`}
+                          value={maxBars ?? ""}
+                          onChange={(e) =>
+                            setMaxBars(
+                              e.target.value === "" ? undefined : Number(e.target.value) || undefined,
+                            )
+                          }
+                        />
+                        {activeProfile && maxBars !== undefined && (
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                            <span>✓</span>
+                            <span>Range length from profile: {maxBars} bars</span>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Commission
+                          <InfoIcon tooltip="Fixed cost per trade in dollars. Charged on both entry and exit. Examples: $0.50, $1, $5." />
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          value={commissionInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
+                            setCommissionInput(val);
+                            if (isIntermediateNumeric(val)) return;
+                            setCommission(Number(val));
+                          }}
+                          onBlur={() => {
+                            if (isIntermediateNumeric(commissionInput)) {
+                              const fallback = 0;
+                              setCommission(fallback);
+                              setCommissionInput(String(fallback));
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="mb-1 block text-xs text-gray-400">
+                          Slippage (bps)
+                          <InfoIcon tooltip="Price slippage in basis points (1 bps = 0.01%). Simulates market impact. Example: 5 bps on a $100 stock = $0.05 per share." />
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          value={slippageInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
+                            setSlippageInput(val);
+                            if (isIntermediateNumeric(val)) return;
+                            setSlippageBps(Number(val));
+                          }}
+                          onBlur={() => {
+                            if (isIntermediateNumeric(slippageInput)) {
+                              const fallback = 0;
+                              setSlippageBps(fallback);
+                              setSlippageInput(String(fallback));
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </Collapse>
+                </section>
+
                 {/* Strategy Selection */}
-                <section className="relative z-20 rounded-xl border border-gray-800 bg-gray-900/80 p-4 shadow-xl backdrop-blur-sm">
-                  <h3 className="mb-3 text-sm font-semibold text-gray-200">Strategy</h3>
-                  <div className="mb-4 flex gap-2">
+                <section className="relative z-20 rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm">
+                  <h3 className="mb-2 text-xs font-semibold text-gray-200">Strategy</h3>
+                  <div className="mb-3 flex gap-2">
                     <button
                       type="button"
                       onClick={() => setMode("builtin")}
-                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                      className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                         mode === "builtin"
                           ? "bg-white text-black shadow-lg shadow-white/30"
                           : "border border-gray-700 text-gray-300 hover:border-gray-600"
@@ -2106,7 +2811,7 @@ function BacktestPageContent() {
                     <button
                       type="button"
                       onClick={() => setMode("custom")}
-                      className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                      className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                         mode === "custom"
                           ? "bg-white text-black shadow-lg shadow-white/30"
                           : "border border-gray-700 text-gray-300 hover:border-gray-600"
@@ -2116,7 +2821,7 @@ function BacktestPageContent() {
                     </button>
                   </div>
 
-                  <Collapse open={mode === "builtin"} className="space-y-3">
+                  <Collapse open={mode === "builtin"} className="space-y-2.5">
                     <StrategySelect
                       options={builtinList}
                       value={builtinId}
@@ -2141,7 +2846,8 @@ function BacktestPageContent() {
                     <div className="grid grid-cols-2 gap-3">
                       {builtinList
                         .find((b) => b.id === builtinId)
-                        ?.params.map((p) => (
+                        ?.params.filter((p) => p.name !== 'qty')
+                        .map((p) => (
                           <div key={p.name}>
                             <label className="mb-1 block text-xs text-gray-400">
                               {p.name} ({p.type})
@@ -2173,7 +2879,15 @@ function BacktestPageContent() {
                         </button>
                       ))}
                     </div>
-                    <div className="rounded-xl border border-gray-800 bg-gray-950 scrollbar-hide">
+                    <div className="relative rounded-xl border border-gray-800 bg-gray-950 scrollbar-hide">
+                      <button
+                        type="button"
+                        onClick={() => setEditorExpanded(!editorExpanded)}
+                        className="absolute top-2 right-2 z-10 rounded bg-gray-800/80 px-2 py-1 text-[11px] text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                        title={editorExpanded ? "Exit fullscreen" : "Expand editor"}
+                      >
+                        {editorExpanded ? "✕ Exit" : "⛶ Expand"}
+                      </button>
                       <CodeEditor
                         value={strategyCode}
                         height="300px"
@@ -2182,6 +2896,29 @@ function BacktestPageContent() {
                         onChange={(val) => setStrategyCode(val)}
                       />
                     </div>
+                    {editorExpanded && (
+                      <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 p-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h2 className="text-lg font-semibold text-white">Strategy Code Editor</h2>
+                          <button
+                            type="button"
+                            onClick={() => setEditorExpanded(false)}
+                            className="rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <div className="flex-1 rounded-xl border border-gray-800 bg-gray-950 overflow-hidden">
+                          <CodeEditor
+                            value={strategyCode}
+                            height="100%"
+                            extensions={[python()]}
+                            theme="dark"
+                            onChange={(val) => setStrategyCode(val)}
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <label className="text-xs font-semibold text-gray-300">Strategy Parameters (JSON)</label>
                       <div className="flex flex-wrap gap-2 text-[11px]">
@@ -2265,146 +3002,6 @@ function BacktestPageContent() {
                   </Collapse>
                 </section>
 
-                  {/* Trading Parameters - Collapsible */}
-                  <section className="relative z-10 rounded-xl border border-gray-800 bg-gray-900/80 p-4 shadow-xl backdrop-blur-sm">
-                    <button
-                      type="button"
-                      onClick={() => setShowTradingParams(!showTradingParams)}
-                      className="flex w-full items-center justify-between text-sm font-semibold text-gray-200"
-                    >
-                      <span>Trading Parameters</span>
-                      <span className="text-gray-500">{showTradingParams ? "−" : "+"}</span>
-                    </button>
-                    <Collapse open={showTradingParams} className="mt-4 space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="col-span-2">
-                          <label className="block text-xs text-gray-400 mb-1">
-                            Initial Cash
-                            <InfoIcon tooltip="Starting capital for the backtest. This is the total cash available to deploy." />
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition focus:ring-2 ${
-                                usingPortfolio
-                                  ? "border-blue-600 bg-blue-950/30 focus:border-blue-500 focus:ring-blue-500/20"
-                                  : "border-gray-700 bg-gray-950 focus:border-white focus:ring-white/20"
-                              }`}
-                              value={initialCashInput}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
-                                setInitialCashInput(val);
-                                if (isIntermediateNumeric(val)) return;
-                                setInitialCash(Number(val));
-                                setUsingPortfolio(false);
-                              }}
-                              onBlur={() => {
-                                if (isIntermediateNumeric(initialCashInput)) {
-                                  const fallback = 0;
-                                  setInitialCash(fallback);
-                                  setInitialCashInput(String(fallback));
-                                }
-                              }}
-                            />
-                            {usingPortfolio && portfolioEquity !== null && (
-                              <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
-                                <span>✓</span>
-                                <span>Using portfolio equity: ${portfolioEquity.toLocaleString()}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Start Bar
-                            <InfoIcon tooltip="Bar index to start the backtest from. Leave empty to start from the beginning. Useful for testing strategies on specific time periods." />
-                          </label>
-                          <input
-                            type="number"
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={startBar ?? ""}
-                            onChange={(e) =>
-                              setStartBar(
-                                e.target.value === "" ? undefined : Number(e.target.value) || undefined,
-                              )
-                            }
-                            min="0"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Max Bars
-                            <InfoIcon tooltip="Maximum number of price bars to process. Leave empty to process all data. Lower values = faster backtests." />
-                          </label>
-                          <input
-                            type="number"
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={maxBars ?? ""}
-                            onChange={(e) =>
-                              setMaxBars(
-                                e.target.value === "" ? undefined : Number(e.target.value) || undefined,
-                              )
-                            }
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Commission
-                            <InfoIcon tooltip="Fixed cost per trade in dollars. Charged on both entry and exit. Examples: $0.50, $1, $5." />
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={commissionInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
-                              setCommissionInput(val);
-                              if (isIntermediateNumeric(val)) return;
-                              setCommission(Number(val));
-                            }}
-                            onBlur={() => {
-                              if (isIntermediateNumeric(commissionInput)) {
-                                const fallback = 0;
-                                setCommission(fallback);
-                                setCommissionInput(String(fallback));
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="mb-1 block text-xs text-gray-400">
-                            Slippage (bps)
-                            <InfoIcon tooltip="Price slippage in basis points (1 bps = 0.01%). Simulates market impact. Example: 5 bps on a $100 stock = $0.05 per share." />
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
-                            value={slippageInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (!numericInputRegex.test(val) && !isIntermediateNumeric(val)) return;
-                              setSlippageInput(val);
-                              if (isIntermediateNumeric(val)) return;
-                              setSlippageBps(Number(val));
-                            }}
-                            onBlur={() => {
-                              if (isIntermediateNumeric(slippageInput)) {
-                                const fallback = 0;
-                                setSlippageBps(fallback);
-                                setSlippageInput(String(fallback));
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </Collapse>
-                  </section>
-
                 {/* Run Button */}
                 <button
                   type="submit"
@@ -2415,7 +3012,7 @@ function BacktestPageContent() {
                     (mode === "builtin" && !builtinId) ||
                     (mode === "custom" && Boolean(strategyParamsError))
                   }
-                  className="w-full rounded-xl bg-white py-3 text-sm font-bold text-black shadow-lg shadow-white/30 transition hover:bg-white disabled:opacity-50 disabled:hover:bg-white"
+                  className="w-full rounded-xl bg-white py-2.5 text-sm font-bold text-black shadow-lg shadow-white/30 transition hover:bg-white disabled:opacity-50 disabled:hover:bg-white"
                 >
                   {loading ? "Running Backtest..." : "Run Backtest"}
                 </button>
@@ -2455,6 +3052,37 @@ function BacktestPageContent() {
                 </div>
               ) : (
                 <>
+                  {/* Equity Summary */}
+                  <section className="rounded-2xl border-2 border-blue-700 bg-blue-950/30 p-5 shadow-xl backdrop-blur-sm mb-6">
+                    <h2 className="text-lg font-semibold text-blue-300 mb-4">Equity Summary</h2>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <div className="text-xs text-blue-400 font-semibold mb-1">Initial Equity</div>
+                        <div className="text-2xl font-mono font-bold text-white">
+                          ${initialCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-blue-400 font-semibold mb-1">Final Equity</div>
+                        <div className={`text-2xl font-mono font-bold ${
+                          result.stats.total_return >= 0 ? "text-green-400" : "text-red-400"
+                        }`}>
+                          ${(initialCash * (1 + result.stats.total_return)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-blue-800">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-blue-300 font-semibold">Total Change</span>
+                        <span className={`text-xl font-mono font-bold ${
+                          result.stats.total_return >= 0 ? "text-green-400" : "text-red-400"
+                        }`}>
+                          {result.stats.total_return >= 0 ? "+" : ""}${(initialCash * result.stats.total_return).toFixed(2)} ({result.stats.total_return >= 0 ? "+" : ""}{(result.stats.total_return * 100).toFixed(2)}%)
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+
                   {/* Key Metrics Bar */}
                   <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex items-center justify-between">
@@ -2472,7 +3100,7 @@ function BacktestPageContent() {
                       />
                       <KeyMetricCard
                         label="Sharpe Ratio"
-                        value={result.stats.sharpe.toFixed(2)}
+                        value={result.stats.sharpe != null ? result.stats.sharpe.toFixed(2) : "N/A"}
                         tooltip="Risk-adjusted return metric. Measures excess return per unit of risk. Higher is better. Above 1 is good, above 2 is excellent."
                       />
                       <KeyMetricCard
@@ -2506,17 +3134,17 @@ function BacktestPageContent() {
                           />
                           <SecondaryMetricRow
                             label="Volatility"
-                            value={(result.stats.volatility * 100).toFixed(2) + "%"}
+                            value={result.stats.volatility != null ? (result.stats.volatility * 100).toFixed(2) + "%" : "N/A"}
                             tooltip="Standard deviation of returns. Measures how much returns fluctuate. Higher volatility means more risk."
                           />
                           <SecondaryMetricRow
                             label="Sortino"
-                            value={result.stats.sortino.toFixed(2)}
+                            value={result.stats.sortino != null ? result.stats.sortino.toFixed(2) : "N/A"}
                             tooltip="Similar to Sharpe but only penalizes downside volatility. Better for asymmetric return distributions."
                           />
                           <SecondaryMetricRow
                             label="Calmar"
-                            value={result.stats.calmar.toFixed(2)}
+                            value={result.stats.calmar != null ? result.stats.calmar.toFixed(2) : "N/A"}
                             tooltip="Annualized return divided by max drawdown. Measures return relative to worst-case loss. Higher is better."
                           />
                           <SecondaryMetricRow
@@ -2545,6 +3173,69 @@ function BacktestPageContent() {
                             tooltip="Number of completed round-trip trades. More trades generally means more statistical significance."
                           />
                           <SecondaryMetricRow label="Bars Processed" value={result.stats.equity_curve.length.toString()} />
+
+                          {/* Advanced Trade Metrics */}
+                          {(() => {
+                            const advancedMetrics = calculateAdvancedMetrics(result.trades);
+                            return (
+                              <>
+                                <SecondaryMetricRow
+                                  label="Profit Factor"
+                                  value={advancedMetrics.profitFactor === Infinity ? "∞" : advancedMetrics.profitFactor.toFixed(2)}
+                                  tooltip="Ratio of gross profit to gross loss. Above 1.0 means profitable. Above 2.0 is excellent."
+                                />
+                                <SecondaryMetricRow
+                                  label="Expectancy"
+                                  value={`$${advancedMetrics.expectancy.toFixed(2)}`}
+                                  tooltip="Average profit/loss per trade. Positive expectancy means the strategy is profitable on average."
+                                />
+                                <SecondaryMetricRow
+                                  label="Largest Win"
+                                  value={`$${advancedMetrics.largestWin.toFixed(2)}`}
+                                  tooltip="The single most profitable trade in the backtest period."
+                                />
+                                <SecondaryMetricRow
+                                  label="Largest Loss"
+                                  value={`$${advancedMetrics.largestLoss.toFixed(2)}`}
+                                  tooltip="The single most unprofitable trade in the backtest period."
+                                />
+                                <SecondaryMetricRow
+                                  label="Max Consecutive Wins"
+                                  value={advancedMetrics.consecutiveWins.toString()}
+                                  tooltip="The longest streak of consecutive winning trades."
+                                />
+                                <SecondaryMetricRow
+                                  label="Max Consecutive Losses"
+                                  value={advancedMetrics.consecutiveLosses.toString()}
+                                  tooltip="The longest streak of consecutive losing trades. Indicates potential psychological stress periods."
+                                />
+                              </>
+                            );
+                          })()}
+
+                          {/* Drawdown Statistics */}
+                          {(() => {
+                            const ddStats = calculateDrawdownStats(result.stats.equity_curve);
+                            return (
+                              <>
+                                <SecondaryMetricRow
+                                  label="Max DD Duration (Bars)"
+                                  value={ddStats.maxDrawdownDuration.toString()}
+                                  tooltip="Number of bars the portfolio stayed in the longest drawdown period."
+                                />
+                                <SecondaryMetricRow
+                                  label="Avg DD Duration (Bars)"
+                                  value={ddStats.avgDrawdownDuration.toFixed(1)}
+                                  tooltip="Average number of bars across all drawdown periods."
+                                />
+                                <SecondaryMetricRow
+                                  label="Recovery Time (Bars)"
+                                  value={ddStats.recoveryTime.toString()}
+                                  tooltip="Number of bars it took to recover from the maximum drawdown to previous peak."
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
                       </Collapse>
                     </div>
@@ -2629,31 +3320,148 @@ function BacktestPageContent() {
                         />
                       </div>
                     )}
+
+                    {/* Cumulative P&L Chart and Trade Distribution Side by Side */}
+                    {(cumulativePnLData || tradeDistributionData) && (
+                      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Cumulative P&L Chart */}
+                        {cumulativePnLData && (
+                          <div
+                            className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                            style={{ animationDelay: chartsIntro ? "300ms" : "0ms" }}
+                          >
+                            <div className="mb-2 text-xs font-semibold text-gray-300">Cumulative P&L</div>
+                            <div className="h-[280px]">
+                              <Line data={cumulativePnLData} options={cumulativePnLOptions} />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Trade Distribution Histogram */}
+                        {tradeDistributionData && (
+                          <div
+                            className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                            style={{ animationDelay: chartsIntro ? "400ms" : "0ms" }}
+                          >
+                            <div className="mb-2 text-xs font-semibold text-gray-300">Trade P&L Distribution</div>
+                            <div className="h-[280px]">
+                              <Bar data={tradeDistributionData} options={histogramOptions} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </section>
 
                   {/* Tabs: Trades | Orders | History */}
                   <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                       <h2 className="text-lg font-semibold text-gray-50">Details</h2>
-                      <div className="flex gap-2">
-                        {[
-                          { id: "trades", label: "Trades" },
-                          { id: "orders", label: "Orders" },
-                          { id: "history", label: "History" },
-                        ].map((tab) => (
+                      <div className="flex flex-wrap gap-2">
+                        {/* Export Buttons */}
+                        <div className="flex gap-2">
                           <button
-                            key={tab.id}
                             type="button"
-                            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                              detailTab === tab.id
-                                ? "bg-white text-black shadow-lg shadow-white/20"
-                                : "border border-gray-700 text-gray-300 hover:border-gray-600"
-                            }`}
-                            onClick={() => setDetailTab(tab.id as typeof detailTab)}
+                            onClick={() => {
+                              if (!result) return;
+                              const csvContent = [
+                                ["Metric", "Value"],
+                                ["Total Return", `${(result.stats.total_return * 100).toFixed(2)}%`],
+                                ["Sharpe Ratio", result.stats.sharpe != null ? result.stats.sharpe.toFixed(2) : "N/A"],
+                                ["Max Drawdown", `${(result.stats.max_drawdown * 100).toFixed(2)}%`],
+                                ["Win Rate", `${(result.trade_stats.win_rate * 100).toFixed(1)}%`],
+                                ["Net P&L", `$${result.trade_stats.net_pnl.toFixed(2)}`],
+                                ["Total Trades", result.trade_stats.num_trades.toString()],
+                                ...calculateAdvancedMetrics(result.trades) ? [
+                                  ["Profit Factor", calculateAdvancedMetrics(result.trades).profitFactor === Infinity ? "∞" : calculateAdvancedMetrics(result.trades).profitFactor.toFixed(2)],
+                                  ["Expectancy", `$${calculateAdvancedMetrics(result.trades).expectancy.toFixed(2)}`],
+                                  ["Largest Win", `$${calculateAdvancedMetrics(result.trades).largestWin.toFixed(2)}`],
+                                  ["Largest Loss", `$${calculateAdvancedMetrics(result.trades).largestLoss.toFixed(2)}`],
+                                ] : []
+                              ].map(row => row.join(",")).join("\n");
+
+                              const blob = new Blob([csvContent], { type: "text/csv" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `backtest-metrics-${result.run_id}.csv`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
                           >
-                            {tab.label}
+                            Export Metrics (CSV)
                           </button>
-                        ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!result) return;
+                              const csvContent = [
+                                ["Timestamp", "Symbol", "Side", "Qty", "Price", "Commission", "Slippage", "Realized P&L"],
+                                ...result.trades.map(t => [
+                                  t.timestamp,
+                                  t.symbol || "",
+                                  t.side,
+                                  t.qty.toString(),
+                                  t.price.toFixed(4),
+                                  (t.commission || 0).toFixed(4),
+                                  (t.slippage || 0).toFixed(4),
+                                  (t.realized_pnl || 0).toFixed(2),
+                                ])
+                              ].map(row => row.join(",")).join("\n");
+
+                              const blob = new Blob([csvContent], { type: "text/csv" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `backtest-trades-${result.run_id}.csv`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
+                          >
+                            Export Trades (CSV)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!result) return;
+                              const jsonContent = JSON.stringify(result, null, 2);
+                              const blob = new Blob([jsonContent], { type: "application/json" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `backtest-full-${result.run_id}.json`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
+                          >
+                            Export Full (JSON)
+                          </button>
+                        </div>
+
+                        {/* Tab Buttons */}
+                        <div className="flex gap-2">
+                          {[
+                            { id: "trades", label: "Trades" },
+                            { id: "orders", label: "Orders" },
+                            { id: "history", label: "History" },
+                          ].map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                                detailTab === tab.id
+                                  ? "bg-white text-black shadow-lg shadow-white/20"
+                                  : "border border-gray-700 text-gray-300 hover:border-gray-600"
+                              }`}
+                              onClick={() => setDetailTab(tab.id as typeof detailTab)}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
@@ -2915,7 +3723,7 @@ function BacktestPageContent() {
                                   </div>
                                   <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
                                     <span>Ret: {(h.result.stats.total_return * 100).toFixed(2)}%</span>
-                                    <span>Sharpe: {h.result.stats.sharpe.toFixed(2)}</span>
+                                    <span>Sharpe: {h.result.stats.sharpe != null ? h.result.stats.sharpe.toFixed(2) : "N/A"}</span>
                                   </div>
                                   <div className="flex gap-2">
                                     <button
@@ -2933,6 +3741,7 @@ function BacktestPageContent() {
                                         setSymbol(h.form.symbol);
                                         setCsvPath(h.form.csvPath);
                                         setInitialCash(h.form.initialCash);
+                                        setStartBar(h.form.startBar ?? undefined);
                                         setMaxBars(h.form.maxBars ?? undefined);
                                         setCommission(h.form.commission);
                                         setSlippageBps(h.form.slippageBps);

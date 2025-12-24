@@ -30,6 +30,10 @@ interface ManualModeProps {
   symbol: string;
   apiBase: string;
   initialCashOverride?: number;
+  startBar?: number;
+  maxBars?: number;
+  showGuide?: boolean;
+  setShowGuide?: (show: boolean) => void;
 }
 
 interface SavedConfiguration {
@@ -41,7 +45,17 @@ interface SavedConfiguration {
   createdAt: string;
 }
 
-export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, initialCashOverride }: ManualModeProps) {
+export default function ManualMode({
+  datasetPath,
+  datasetName,
+  symbol,
+  apiBase,
+  initialCashOverride,
+  startBar,
+  maxBars,
+  showGuide = true,
+  setShowGuide,
+}: ManualModeProps) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const tradesRef = useRef<Trade[]>([]);
   const [currentMode, setCurrentMode] = useState<"buy_stock" | "buy_call" | "buy_put">("buy_stock");
@@ -60,11 +74,19 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
   const [takeProfit, setTakeProfit] = useState<number | null>(null);
 
   // Portfolio state - use override if provided
-  const [initialCash] = useState(initialCashOverride ?? 100000);
+  const [initialCash, setInitialCash] = useState(initialCashOverride ?? 100000);
   const [cash, setCash] = useState(initialCashOverride ?? 100000);
   const [positions, setPositions] = useState<Map<string, { qty: number; avgPrice: number }>>(new Map());
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (typeof initialCashOverride !== "number" || Number.isNaN(initialCashOverride)) {
+      return;
+    }
+    setInitialCash(initialCashOverride);
+    setCash(initialCashOverride);
+  }, [initialCashOverride]);
 
   // Configuration saving state
   const [savedConfigurations, setSavedConfigurations] = useState<SavedConfiguration[]>([]);
@@ -118,6 +140,8 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
             builtin_strategy_id: "buy_and_hold", // Simple strategy just to get price data
             initial_cash: 10000,
             symbol: symbol,
+            start_bar: startBar ?? null,
+            max_bars: maxBars ?? null,
           }),
         });
 
@@ -129,6 +153,19 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
         if (data.timestamps && data.price_series) {
           setTimestamps(data.timestamps);
           setPrices(data.price_series);
+
+          // Debug: Log the actual date range loaded
+          if (data.timestamps.length > 0) {
+            const firstDate = new Date(data.timestamps[0]).toISOString().slice(0, 10);
+            const lastDate = new Date(data.timestamps[data.timestamps.length - 1]).toISOString().slice(0, 10);
+            console.log('[Manual Mode] Loaded price data:', {
+              firstDate,
+              lastDate,
+              numBars: data.timestamps.length,
+              requestedStartBar: startBar,
+              requestedMaxBars: maxBars
+            });
+          }
         } else {
           throw new Error("Invalid price data received");
         }
@@ -141,7 +178,7 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
     };
 
     loadPriceData();
-  }, [datasetPath, symbol, apiBase]);
+  }, [datasetPath, symbol, apiBase, maxBars, startBar]);
 
   const handleChartClick = (event: ChartEvent, elements: ActiveElement[]) => {
     // Don't place trades if user was zooming/panning
@@ -173,15 +210,22 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
       dataIndex = Math.round(xValue ?? 0);
     }
 
-    if (dataIndex < 0 || dataIndex >= timestamps.length || dataIndex >= prices.length) return;
+    if (dataIndex < 0 || dataIndex >= timestamps.length || dataIndex >= prices.length) {
+      setError(`Cannot place trade outside the backtest range (bar ${dataIndex}). Valid range: 0-${timestamps.length - 1}`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
 
     const clickedTimestamp = timestamps[dataIndex];
     const clickedPrice = prices[dataIndex];
 
     // Check if we're setting an exit for a pending trade
     if (pendingExit) {
-      // Validate exit is after entry
-      if (dataIndex <= pendingExit.index) {
+      // Convert chart-relative index to absolute dataset index for comparison
+      const absoluteExitIndex = (startBar ?? 0) + dataIndex;
+
+      // Validate exit is after entry (both in absolute indices now)
+      if (absoluteExitIndex <= pendingExit.index) {
         setError("Exit must be after entry point");
         setTimeout(() => setError(null), 3000);
         return;
@@ -191,7 +235,7 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
       const updatedTrade = {
         ...pendingExit,
         exitTimestamp: clickedTimestamp,
-        exitIndex: dataIndex,
+        exitIndex: absoluteExitIndex,
         exitPrice: clickedPrice,
         stopLoss: stopLoss ?? undefined,
         takeProfit: takeProfit ?? undefined,
@@ -217,10 +261,13 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
     }
 
     // Create BUY trade at this point (no more sell stock option)
+    // Convert chart-relative index to absolute dataset index
+    const absoluteIndex = (startBar ?? 0) + dataIndex;
+
     const newTrade: Trade = {
       id: `trade_${Date.now()}`,
       timestamp: clickedTimestamp,
-      index: dataIndex,
+      index: absoluteIndex,
       type: currentMode.includes("stock") ? "stock" : currentMode.includes("call") ? "call" : "put",
       action: "buy", // Always BUY now
       price: clickedPrice,
@@ -353,48 +400,103 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
       // Sort trades by timestamp
       const sortedTrades = [...trades].sort((a, b) => a.timestamp - b.timestamp);
 
-      // Convert to backend format
-      const annotations = sortedTrades
-        .filter((t) => t.type !== "stock")
-        .map((t) => ({
-          id: t.id,
-          timestamp: t.timestamp,
-          type: t.type,
-          action: t.action,
-          strike: t.strike!,
-          expiry: t.expiry!,
-          contracts: Math.floor(t.quantity / 100), // Convert shares to contracts
-          note: t.note,
-        }));
+      // Separate stock and option trades
+      const stockTrades = sortedTrades.filter((t) => t.type === "stock");
+      const optionTrades = sortedTrades.filter((t) => t.type !== "stock");
+
+      // Convert option trades to backend format
+      const annotations = optionTrades.map((t) => ({
+        id: t.id,
+        timestamp: t.timestamp,
+        type: t.type,
+        action: t.action,
+        strike: t.strike!,
+        expiry: t.expiry!,
+        contracts: Math.floor(t.quantity / 100), // Convert shares to contracts
+        note: t.note,
+      }));
+
+      // Convert stock trades to backend format
+      const stockAnnotations = stockTrades.map((t) => ({
+        id: t.id,
+        entryTimestamp: t.timestamp,
+        entryIndex: t.index,
+        exitTimestamp: t.exitTimestamp,
+        exitIndex: t.exitIndex,
+        quantity: t.quantity,
+        stopLoss: t.stopLoss,
+        takeProfit: t.takeProfit,
+      }));
+
+      const requestBody = {
+        mode: "manual",
+        csv_path: datasetPath,
+        symbol: symbol,
+        start_bar: startBar ?? null,
+        max_bars: maxBars ?? null,
+        annotations: annotations.length > 0 ? annotations : undefined,
+        stock_trades: stockAnnotations.length > 0 ? stockAnnotations : undefined,
+        option_settings: annotations.length > 0 ? {
+          implied_volatility: 0.30,
+          risk_free_rate: 0.05,
+          use_black_scholes: true,
+          scenario: "base",
+          scenario_move_pct: 0.10,
+          commission_per_contract: 0.65,
+        } : undefined,
+        initial_cash: initialCash,
+      };
+
+      console.log('[Manual Mode] Sending simulation request:', {
+        datasetPath,
+        symbol,
+        startBar,
+        maxBars,
+        numAnnotations: annotations.length,
+        requestBody
+      });
 
       const response = await fetch(`${apiBase}/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "manual",
-          csv_path: datasetPath,
-          symbol: symbol,
-          annotations: annotations,
-          option_settings: {
-            implied_volatility: 0.30,
-            risk_free_rate: 0.05,
-            use_black_scholes: true,
-            scenario: "base",
-            scenario_move_pct: 0.10,
-            commission_per_contract: 0.65,
-          },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Simulation failed");
+        let errorMessage = `Simulation failed with status ${response.status}`;
+        try {
+          const errorData = await response.json();
+          console.error('[Manual Mode] Backend error response:', errorData);
+
+          // Handle different error formats
+          if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          } else if (errorData.detail) {
+            errorMessage = typeof errorData.detail === 'string'
+              ? errorData.detail
+              : JSON.stringify(errorData.detail);
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          } else {
+            errorMessage = JSON.stringify(errorData);
+          }
+        } catch (parseError) {
+          try {
+            const errorText = await response.text();
+            errorMessage = errorText || errorMessage;
+          } catch {
+            // Keep default error message
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      console.error('Simulation error:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage);
     } finally {
       setIsRunning(false);
     }
@@ -422,7 +524,9 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
 
       currentTrades.forEach((trade) => {
         // Draw ENTRY line
-        const entryX = scales.x.getPixelForValue(trade.index);
+        // Convert absolute index to chart-relative index for display
+        const relativeEntryIndex = trade.index - (startBar ?? 0);
+        const entryX = scales.x.getPixelForValue(relativeEntryIndex);
 
         // Get or initialize animation progress for this trade
         let progress = animationProgressRef.current.get(trade.id) || 0;
@@ -461,7 +565,9 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
 
         // Draw EXIT line if it exists
         if (trade.exitIndex !== undefined && trade.exitPrice !== undefined) {
-          const exitX = scales.x.getPixelForValue(trade.exitIndex);
+          // Convert absolute exit index to chart-relative index for display
+          const relativeExitIndex = trade.exitIndex - (startBar ?? 0);
+          const exitX = scales.x.getPixelForValue(relativeExitIndex);
           const exitColor = "#ef4444"; // red for exit
 
           ctx.save();
@@ -549,27 +655,95 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
       )}
 
       {/* Instructions */}
-      <div className="rounded-xl border border-blue-900/50 bg-blue-950/30 p-4">
-        <h3 className="text-sm font-semibold text-blue-400 mb-2">How to Use Fundamental Mode</h3>
-        <ol className="text-sm text-blue-300 space-y-1 list-decimal list-inside">
-          <li>Select trade type (Buy Stock, Buy Call, or Buy Put)</li>
-          <li><strong>Click</strong> on the chart where you want to ENTER the trade</li>
-          <li>Set your exit strategy: choose a date OR click the chart again for your EXIT point</li>
-          <li>Optional: Set stop loss and take profit levels for risk management</li>
-          <li>Hold <strong>Shift + Drag</strong> to zoom, or use <strong>mouse wheel</strong> to zoom in/out</li>
-          <li>Click "Run Simulation" to see how your trades would have performed</li>
-        </ol>
-      </div>
+      {showGuide && (
+        <div className="rounded-xl border border-blue-900/50 bg-blue-950/30 p-4">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <h3 className="text-sm font-semibold text-blue-400">How to Use Fundamental Mode</h3>
+            {setShowGuide && (
+              <button
+                type="button"
+                onClick={() => setShowGuide(false)}
+                className="text-blue-400 hover:text-white transition text-lg leading-none"
+                title="Dismiss guide"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <ol className="text-sm text-blue-300 space-y-1 list-decimal list-inside">
+            <li>Select trade type (Buy Stock, Buy Call, or Buy Put)</li>
+            <li><strong>Click</strong> on the chart where you want to ENTER the trade</li>
+            <li>Set your exit strategy: choose a date OR click the chart again for your EXIT point</li>
+            <li>Optional: Set stop loss and take profit levels for risk management</li>
+            <li>Hold <strong>Shift + Drag</strong> to zoom, or use <strong>mouse wheel</strong> to zoom in/out</li>
+            <li>Click "Run Simulation" to see how your trades would have performed</li>
+          </ol>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
         {/* Left Panel - Trade Controls */}
         <div className="space-y-4">
+          {/* Dataset & Backtest Range Info */}
+          {timestamps.length > 0 && (
+            <div className="rounded-xl border border-blue-800 bg-blue-950/30 p-3">
+              <h3 className="text-xs font-semibold text-blue-300 mb-2">Active Dataset</h3>
+              <div className="space-y-1 text-[11px] mb-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-400">Dataset:</span>
+                  <span className="text-white font-mono font-semibold">{datasetName}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-400">Symbol:</span>
+                  <span className="text-white font-mono font-semibold">{symbol}</span>
+                </div>
+              </div>
+              <div className="border-t border-blue-800/50 pt-2">
+                <h4 className="text-xs font-semibold text-blue-300 mb-1.5">Selected Range</h4>
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-400">Start:</span>
+                    <span className="text-white font-mono">{new Date(timestamps[0]).toISOString().slice(0, 10)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-400">End:</span>
+                    <span className="text-white font-mono">{new Date(timestamps[timestamps.length - 1]).toISOString().slice(0, 10)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-400">Total Bars:</span>
+                    <span className="text-white font-mono">{timestamps.length}</span>
+                  </div>
+                  {startBar !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-blue-400">Bar Range:</span>
+                      <span className="text-white font-mono text-[10px]">
+                        {startBar} → {startBar + timestamps.length - 1}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-blue-800/50">
+                <p className="text-[10px] text-blue-300">
+                  ✓ Trades can only be placed within this range
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Portfolio Stats */}
           <div className="rounded-xl border border-gray-800 bg-gradient-to-br from-gray-900/80 to-gray-950/80 p-4">
-            <h3 className="text-sm font-semibold text-white mb-3">💰 Portfolio</h3>
+            <h3 className="text-sm font-semibold text-white mb-3">Portfolio</h3>
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400">Cash</span>
+                <span className="text-xs text-gray-400">Initial Equity</span>
+                <span className="text-sm font-mono font-semibold text-gray-300">
+                  ${initialCash.toFixed(2)}
+                </span>
+              </div>
+              <div className="h-px bg-gray-700 my-2"></div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-gray-400">Current Cash</span>
                 <span className={`text-sm font-mono font-semibold ${cash < initialCash * 0.1 ? 'text-red-400' : 'text-green-400'}`}>
                   ${cash.toFixed(2)}
                 </span>
@@ -582,15 +756,18 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
               </div>
               <div className="h-px bg-gray-700 my-2"></div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400">Total Equity</span>
+                <span className="text-xs text-gray-400 font-semibold">Current Total Equity</span>
                 <span className="text-base font-mono font-bold text-white">
                   ${(cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400">P&L</span>
-                <span className={`text-sm font-mono font-semibold ${cash >= initialCash ? 'text-green-400' : 'text-red-400'}`}>
-                  {cash >= initialCash ? '+' : ''}{((cash - initialCash) / initialCash * 100).toFixed(2)}%
+                <span className="text-xs text-gray-400">Total P&L</span>
+                <span className={`text-sm font-mono font-semibold ${
+                  (cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) >= initialCash ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {(cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) >= initialCash ? '+' : ''}
+                  {(((cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) - initialCash) / initialCash * 100).toFixed(2)}%
                 </span>
               </div>
             </div>
@@ -642,9 +819,25 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
               <input
                 type="number"
                 min="1"
+                max={hoveredIndex !== null && prices[hoveredIndex] ? Math.floor(cash / prices[hoveredIndex]) : undefined}
                 step={currentMode.includes("stock") ? "1" : "1"}
                 value={quantity}
-                onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || 1;
+                  // Always cap quantity based on available cash and current/hovered price
+                  let maxAffordable = Infinity;
+
+                  if (hoveredIndex !== null && prices[hoveredIndex]) {
+                    // Use hovered price if available
+                    maxAffordable = Math.floor(cash / prices[hoveredIndex]);
+                  } else if (prices.length > 0) {
+                    // Use the last price as estimate
+                    const lastPrice = prices[prices.length - 1];
+                    maxAffordable = Math.floor(cash / lastPrice);
+                  }
+
+                  setQuantity(Math.min(val, maxAffordable));
+                }}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white mb-2"
               />
               {hoveredIndex !== null && prices[hoveredIndex] && currentMode.includes("buy") && (
@@ -679,7 +872,17 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
                     <span>Cost: ${(quantity * prices[hoveredIndex!]).toFixed(2)}</span>
                     <span>Max: {Math.floor(cash / prices[hoveredIndex!])} shares</span>
                   </div>
+                  {quantity * prices[hoveredIndex!] > cash && (
+                    <div className="text-[10px] text-red-400 mt-1 font-semibold">
+                      ⚠ Insufficient funds! Reduce quantity or add more cash.
+                    </div>
+                  )}
                 </>
+              )}
+              {(hoveredIndex === null || !prices[hoveredIndex]) && prices.length > 0 && currentMode.includes("buy") && (
+                <div className="text-[10px] text-gray-500 mt-1">
+                  Available cash: ${cash.toFixed(2)}
+                </div>
               )}
             </div>
           </div>
@@ -877,7 +1080,9 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
                             labels.push(`Price: $${context.parsed.y.toFixed(2)}`);
                           }
                           // Show trade info if there's a trade at this index
-                          const trade = trades.find((t) => t.index === context.dataIndex);
+                          // Convert chart-relative dataIndex to absolute index for comparison
+                          const absoluteIndex = (startBar ?? 0) + context.dataIndex;
+                          const trade = trades.find((t) => t.index === absoluteIndex);
                           if (trade) {
                             labels.push(`Trade: ${trade.action.toUpperCase()} ${trade.quantity} ${trade.type === "stock" ? "shares" : `${trade.type.toUpperCase()} contracts`}`);
                           }
@@ -961,6 +1166,36 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
           {result && result.manual_stats && (
             <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
               <h3 className="text-sm font-semibold text-white mb-4">Simulation Results</h3>
+
+              {/* Equity Summary */}
+              <div className="mb-4 rounded-lg border-2 border-blue-700 bg-blue-950/30 p-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs text-blue-400 font-semibold mb-1">Initial Equity</div>
+                    <div className="text-lg font-mono font-bold text-white">
+                      ${initialCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-blue-400 font-semibold mb-1">Final Equity</div>
+                    <div className={`text-lg font-mono font-bold ${
+                      (initialCash + result.manual_stats.net_pnl) >= initialCash ? "text-green-400" : "text-red-400"
+                    }`}>
+                      ${(initialCash + result.manual_stats.net_pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-blue-800">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-blue-300 font-semibold">Total Change</span>
+                    <span className={`text-base font-mono font-bold ${
+                      result.manual_stats.net_pnl >= 0 ? "text-green-400" : "text-red-400"
+                    }`}>
+                      {result.manual_stats.net_pnl >= 0 ? "+" : ""}${result.manual_stats.net_pnl.toFixed(2)} ({result.manual_stats.net_pnl >= 0 ? "+" : ""}{(result.manual_stats.return_on_capital * 100).toFixed(2)}%)
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="rounded border border-gray-700 bg-gray-800 p-3">
@@ -1205,11 +1440,14 @@ export default function ManualMode({ datasetPath, datasetName, symbol, apiBase, 
                     const exitTimestamp = new Date(exitDate).getTime();
                     const exitIndex = timestamps.findIndex((ts) => ts >= exitTimestamp);
 
-                    if (exitIndex > pendingExit.index) {
+                    // Convert chart-relative exitIndex to absolute for comparison and storage
+                    const absoluteExitIndex = (startBar ?? 0) + exitIndex;
+
+                    if (absoluteExitIndex > pendingExit.index) {
                       const updatedTrade = {
                         ...pendingExit,
                         exitTimestamp: timestamps[exitIndex],
-                        exitIndex: exitIndex,
+                        exitIndex: absoluteExitIndex,
                         exitPrice: prices[exitIndex],
                         stopLoss: stopLoss ?? undefined,
                         takeProfit: takeProfit ?? undefined,

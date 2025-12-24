@@ -14,6 +14,7 @@ from .metrics import PerformanceStats, compute_performance, compute_trade_stats,
 class BacktestConfig:
     symbol: str
     initial_cash: float = 100_000.0
+    start_bar: Optional[int] = None
     commission_per_trade: float = 0.0
     slippage_bps: float = 0.0
     max_bars: Optional[int] = None  #for debugging
@@ -59,8 +60,12 @@ class BacktestEngine:
 
         strategy.on_start()
 
+        processed = 0
+        start_bar = max(self.config.start_bar or 0, 0)
         for i, bar in enumerate(self.data_feed.bars()):
-            if self.config.max_bars is not None and i >= self.config.max_bars:
+            if i < start_bar:
+                continue
+            if self.config.max_bars is not None and processed >= self.config.max_bars:
                 break
 
             fills = broker.on_bar(bar)
@@ -72,6 +77,7 @@ class BacktestEngine:
             equity_curve.append(broker.get_equity())
             price_series.append(bar.close)
             timestamps.append(bar.timestamp)
+            processed += 1
 
         strategy.on_end()
 

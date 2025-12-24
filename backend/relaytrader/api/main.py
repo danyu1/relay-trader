@@ -20,7 +20,7 @@ from pydantic import BaseModel, model_validator
 from ..core.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from ..core.strategy import Strategy
 from ..core.data import CSVBarDataFeed, inspect_csv
-from ..core.annotations import TradeAnnotation, AnnotationSet, OptionSettings, SimulatedTrade, ManualBacktestStats
+from ..core.annotations import TradeAnnotation, StockTradeAnnotation, AnnotationSet, OptionSettings, SimulatedTrade, ManualBacktestStats
 from ..core.manual_simulator import ManualSimulator
 from ..strategies import list_strategies, get_strategy_class
 from ..data import DataDownloader
@@ -45,12 +45,14 @@ class BacktestRequest(BaseModel):
     csv_path: str
     symbol: str
     initial_cash: float = 100_000.0
+    start_bar: int | None = None
     commission_per_trade: float = 0.0
     slippage_bps: float = 0.0
     max_bars: int | None = None
     strategy_params: Dict[str, Any] | None = None
     # Manual mode fields
     annotations: list[TradeAnnotation] | None = None
+    stock_trades: list[StockTradeAnnotation] | None = None
     option_settings: OptionSettings | None = None
 
     @model_validator(mode="after")
@@ -59,8 +61,8 @@ class BacktestRequest(BaseModel):
             if not self.strategy_code and not self.builtin_strategy_id:
                 raise ValueError("Provide either strategy_code or builtin_strategy_id for mechanical mode")
         elif self.mode == "manual":
-            if not self.annotations:
-                raise ValueError("Provide annotations for manual mode")
+            if not self.annotations and not self.stock_trades:
+                raise ValueError("Provide annotations or stock_trades for manual mode")
         return self
 
 
@@ -211,23 +213,112 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
 
     # Manual mode
     if req.mode == "manual":
-        if not req.annotations or not req.option_settings:
-            raise HTTPException(status_code=400, detail="Manual mode requires annotations and option_settings")
-
         # Load price data
         import pandas as pd
         df = pd.read_csv(csv_path)
-        timestamps = df["timestamp"].tolist()
-        price_series = df["close"].tolist()
+        total_rows = len(df)
+        start_bar = max(req.start_bar or 0, 0)
+        if start_bar >= total_rows:
+            raise HTTPException(status_code=400, detail="start_bar is beyond dataset length")
+        end_bar = None
+        if req.max_bars is not None:
+            if req.max_bars <= 0:
+                raise HTTPException(status_code=400, detail="max_bars must be greater than 0")
+            end_bar = start_bar + req.max_bars
+        df_slice = df.iloc[start_bar:end_bar]
+        timestamps = df_slice["timestamp"].tolist()
+        price_series = df_slice["close"].tolist()
 
-        # Run simulation
-        simulator = ManualSimulator(
-            annotations=req.annotations,
-            timestamps=timestamps,
-            price_series=price_series,
-            option_settings=req.option_settings,
-        )
-        simulated_trades, manual_stats = simulator.simulate()
+        simulated_trades = []
+        manual_stats = None
+
+        # Handle option trades
+        if req.annotations and req.option_settings:
+            simulator = ManualSimulator(
+                annotations=req.annotations,
+                timestamps=timestamps,
+                price_series=price_series,
+                option_settings=req.option_settings,
+            )
+            simulated_trades, manual_stats = simulator.simulate()
+
+        # Handle stock trades
+        if req.stock_trades:
+            stock_pnl = 0.0
+            stock_trade_results = []
+
+            try:
+                for trade in req.stock_trades:
+                    # Adjust indices to be relative to the sliced data
+                    rel_entry_idx = trade.entryIndex - start_bar
+                    rel_exit_idx = (trade.exitIndex - start_bar) if trade.exitIndex is not None else len(price_series) - 1
+
+                    # Bounds check
+                    if rel_entry_idx < 0 or rel_entry_idx >= len(price_series):
+                        raise HTTPException(status_code=400, detail=f"Trade {trade.id}: entry index {trade.entryIndex} out of range [{start_bar}, {start_bar + len(price_series)})")
+                    if rel_exit_idx < 0 or rel_exit_idx >= len(price_series):
+                        raise HTTPException(status_code=400, detail=f"Trade {trade.id}: exit index {trade.exitIndex} out of range [{start_bar}, {start_bar + len(price_series)})")
+
+                    entry_price = price_series[rel_entry_idx]
+                    exit_price = price_series[rel_exit_idx]
+                    pnl = (exit_price - entry_price) * trade.quantity
+                    stock_pnl += pnl
+
+                    stock_trade_results.append({
+                        "id": trade.id,
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "quantity": trade.quantity,
+                        "pnl": pnl,
+                    })
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Error processing stock trades: {str(e)}")
+
+            # Combine stock trades with option trades stats
+            if manual_stats is None:
+                # Only stock trades, create stats
+                winners = [t["pnl"] for t in stock_trade_results if t["pnl"] > 0]
+                losers = [t["pnl"] for t in stock_trade_results if t["pnl"] < 0]
+
+                manual_stats = ManualBacktestStats(
+                    total_premium_spent=0,
+                    total_premium_received=0,
+                    net_premium=0,
+                    max_payoff=max([t["pnl"] for t in stock_trade_results]) if stock_trade_results else 0,
+                    min_payoff=min([t["pnl"] for t in stock_trade_results]) if stock_trade_results else 0,
+                    net_pnl=stock_pnl,
+                    win_rate=len(winners) / len(stock_trade_results) if stock_trade_results else 0,
+                    num_trades=len(stock_trade_results),
+                    num_winners=len(winners),
+                    num_losers=len(losers),
+                    avg_win=sum(winners) / len(winners) if winners else 0,
+                    avg_loss=sum(losers) / len(losers) if losers else 0,
+                    max_win=max(winners) if winners else 0,
+                    max_loss=min(losers) if losers else 0,
+                    return_on_capital=stock_pnl / req.initial_cash if req.initial_cash > 0 else 0,
+                )
+            else:
+                # Combine option and stock stats - create new instance
+                combined_pnl = manual_stats.net_pnl + stock_pnl
+                manual_stats = ManualBacktestStats(
+                    total_premium_spent=manual_stats.total_premium_spent,
+                    total_premium_received=manual_stats.total_premium_received,
+                    net_premium=manual_stats.net_premium,
+                    max_payoff=max(manual_stats.max_payoff, max([t["pnl"] for t in stock_trade_results]) if stock_trade_results else manual_stats.max_payoff),
+                    min_payoff=min(manual_stats.min_payoff, min([t["pnl"] for t in stock_trade_results]) if stock_trade_results else manual_stats.min_payoff),
+                    net_pnl=combined_pnl,
+                    win_rate=manual_stats.win_rate,  # Would need to recalculate properly
+                    num_trades=manual_stats.num_trades + len(stock_trade_results),
+                    num_winners=manual_stats.num_winners + len([t for t in stock_trade_results if t["pnl"] > 0]),
+                    num_losers=manual_stats.num_losers + len([t for t in stock_trade_results if t["pnl"] < 0]),
+                    avg_win=manual_stats.avg_win,  # Would need to recalculate properly
+                    avg_loss=manual_stats.avg_loss,  # Would need to recalculate properly
+                    max_win=max(manual_stats.max_win, max([t["pnl"] for t in stock_trade_results if t["pnl"] > 0]) if any(t["pnl"] > 0 for t in stock_trade_results) else manual_stats.max_win),
+                    max_loss=min(manual_stats.max_loss, min([t["pnl"] for t in stock_trade_results if t["pnl"] < 0]) if any(t["pnl"] < 0 for t in stock_trade_results) else manual_stats.max_loss),
+                    return_on_capital=combined_pnl / req.initial_cash if req.initial_cash > 0 else 0,
+                )
 
         runtime_ms = (time.perf_counter() - run_start) * 1000
 
@@ -241,12 +332,32 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
             "mode": "manual",
         }
 
+        # Ensure manual_stats exists
+        if manual_stats is None:
+            manual_stats = ManualBacktestStats(
+                total_premium_spent=0,
+                total_premium_received=0,
+                net_premium=0,
+                max_payoff=0,
+                min_payoff=0,
+                net_pnl=0,
+                win_rate=0,
+                num_trades=0,
+                num_winners=0,
+                num_losers=0,
+                avg_win=0,
+                avg_loss=0,
+                max_win=0,
+                max_loss=0,
+                return_on_capital=0,
+            )
+
         response = BacktestResponse(
             mode="manual",
             config={
                 "symbol": req.symbol,
                 "initial_cash": req.initial_cash,
-                "option_settings": req.option_settings.model_dump(),
+                "option_settings": req.option_settings.model_dump() if req.option_settings else None,
             },
             stats={},  # No mechanical stats for manual mode
             trade_stats={},  # No mechanical trade stats
@@ -294,6 +405,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
     config = BacktestConfig(
         symbol=req.symbol,
         initial_cash=req.initial_cash,
+        start_bar=req.start_bar,
         commission_per_trade=req.commission_per_trade,
         slippage_bps=req.slippage_bps,
         max_bars=req.max_bars,
@@ -319,6 +431,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         "symbol": req.symbol,
         "csv_path": req.csv_path,
         "initial_cash": req.initial_cash,
+        "start_bar": req.start_bar,
         "max_bars": req.max_bars,
         "commission_per_trade": req.commission_per_trade,
         "slippage_bps": req.slippage_bps,
@@ -341,6 +454,7 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         config={
             "symbol": result.config.symbol,
             "initial_cash": result.config.initial_cash,
+            "start_bar": result.config.start_bar,
             "commission_per_trade": result.config.commission_per_trade,
             "slippage_bps": result.config.slippage_bps,
             "max_bars": result.config.max_bars,
@@ -442,11 +556,16 @@ async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
 
 
 @app.get("/dataset-preview")
-def dataset_preview(name: str, limit: int = 5) -> Dict[str, Any]:
+def dataset_preview(name: str, limit: int = 5, sample: int = 200) -> Dict[str, Any]:
     if limit <= 0:
         limit = 5
     if limit > 50:
         limit = 50
+    full_series = sample < 0
+    if sample < 0:
+        sample = 0
+    if sample > 2000:
+        sample = 2000
 
     file_path = (DATA_DIR / name).resolve()
     if not file_path.exists() or file_path.parent != DATA_DIR:
@@ -459,12 +578,47 @@ def dataset_preview(name: str, limit: int = 5) -> Dict[str, Any]:
 
     head = df.head(limit).to_dict(orient="records")
     tail = df.tail(limit).to_dict(orient="records")
+
+    series: list[dict[str, Any]] = []
+    close_col = "close" if "close" in df.columns else ("Close" if "Close" in df.columns else None)
+    ts_col = "timestamp" if "timestamp" in df.columns else None
+    if (full_series or sample > 0) and close_col:
+        total_rows = len(df)
+        if total_rows > 0:
+            if full_series or sample >= total_rows:
+                indices = list(range(total_rows))
+            else:
+                step = max(1, total_rows // sample)
+                indices = list(range(0, total_rows, step))
+                if indices[-1] != total_rows - 1:
+                    indices.append(total_rows - 1)
+            subset = df.iloc[indices]
+            if ts_col:
+                timestamps = subset[ts_col].tolist()
+            elif "date" in df.columns:
+                timestamps = (
+                    pd.to_datetime(subset["date"], errors="coerce")
+                    .astype("int64", errors="ignore")
+                    .tolist()
+                )
+            else:
+                timestamps = list(range(len(subset)))
+            closes = subset[close_col].tolist()
+            for idx, close_val in enumerate(closes):
+                ts_val = timestamps[idx] if idx < len(timestamps) else None
+                if ts_val is None:
+                    continue
+                try:
+                    series.append({"timestamp": int(ts_val), "close": float(close_val)})
+                except (TypeError, ValueError):
+                    continue
     return {
         "name": name,
         "head": head,
         "tail": tail,
         "total_rows": int(len(df)),
         "columns": list(df.columns),
+        "series": series,
     }
 
 
@@ -598,3 +752,97 @@ def delete_annotations(dataset: str) -> Dict[str, str]:
         annotation_file.unlink()
 
     return {"status": "ok", "message": "Annotations deleted"}
+
+
+# ==================== LIVE PRICES API ====================
+
+class StockPricesRequest(BaseModel):
+    """Request model for fetching stock prices"""
+    symbols: List[str]
+    range: str = "1M"  # 1D, 1W, 1M, 3M, 6M, 1Y, ALL
+
+
+class StockPriceData(BaseModel):
+    """Stock price data response model"""
+    symbol: str
+    name: str
+    current_price: float
+    previous_close: float
+    historical: List[Dict[str, Any]]  # [{timestamp, price}, ...]
+
+
+@app.post("/api/stock-prices")
+async def get_stock_prices(req: StockPricesRequest):
+    """
+    Fetch current and historical stock prices using yfinance.
+
+    Args:
+        req: Request containing symbols and time range
+
+    Returns:
+        Dictionary mapping symbols to price data
+    """
+    import yfinance as yf
+    from datetime import timedelta
+
+    # Map time range to yfinance period
+    period_map = {
+        "1D": "1d",
+        "1W": "5d",
+        "1M": "1mo",
+        "3M": "3mo",
+        "6M": "6mo",
+        "1Y": "1y",
+        "ALL": "max",
+    }
+
+    period = period_map.get(req.range, "1mo")
+    interval = "1d" if req.range not in ["1D"] else "5m"
+
+    result = {}
+
+    for symbol in req.symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+
+            # Get historical data
+            hist = ticker.history(period=period, interval=interval)
+
+            if hist.empty:
+                raise ValueError(f"No data found for {symbol}")
+
+            # Get company info
+            info = ticker.info
+            company_name = info.get("longName", symbol)
+
+            # Current price (latest close)
+            current_price = float(hist['Close'].iloc[-1])
+
+            # Previous close (second to last if available, otherwise same as current)
+            if len(hist) > 1:
+                previous_close = float(hist['Close'].iloc[-2])
+            else:
+                previous_close = current_price
+
+            # Build historical data array
+            historical = []
+            for idx, row in hist.iterrows():
+                historical.append({
+                    "timestamp": int(idx.timestamp() * 1000),  # Convert to milliseconds
+                    "price": float(row['Close'])
+                })
+
+            result[symbol] = {
+                "symbol": symbol,
+                "name": company_name,
+                "current_price": current_price,
+                "previous_close": previous_close,
+                "historical": historical,
+            }
+
+        except Exception as e:
+            # If we fail to fetch a stock, log but continue with others
+            print(f"Error fetching {symbol}: {e}")
+            result[symbol] = None
+
+    return result

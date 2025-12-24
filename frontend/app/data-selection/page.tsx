@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -14,6 +14,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
+import "@/utils/nativeDateAdapter";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
@@ -38,6 +39,7 @@ interface DatasetPreview {
   tail: Array<Record<string, string | number | boolean | null>>;
   total_rows: number;
   columns: string[];
+  series?: { timestamp: number; close: number }[];
 }
 
 interface DataSetProfile {
@@ -46,6 +48,8 @@ interface DataSetProfile {
   displayName: string;
   startIndex: number;
   endIndex: number;
+  startTimestamp: number;
+  endTimestamp: number;
   startDate: string;
   endDate: string;
   initialEquity: number;
@@ -53,14 +57,18 @@ interface DataSetProfile {
 }
 
 const STORAGE_KEY = "priorsystems:data-profiles";
+const FULL_SERIES_SAMPLE = -1;
 
-export default function DataSelectionPage() {
+function DataSelectionPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<DatasetPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [zoomReady, setZoomReady] = useState(false);
+  const chartRef = useRef<ChartJS<"line">>(null);
 
   // Marker state
   const [startMarkerIndex, setStartMarkerIndex] = useState<number | null>(null);
@@ -76,12 +84,13 @@ export default function DataSelectionPage() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [portfolios, setPortfolios] = useState<any[]>([]);
 
-  // Hover preview state
-  const [hoveredDataset, setHoveredDataset] = useState<string | null>(null);
-  const [hoverPreviewData, setHoverPreviewData] = useState<DatasetPreview | null>(null);
-  const [loadingHoverPreview, setLoadingHoverPreview] = useState(false);
+  // Mini preview cache for dataset list
+  const [datasetPreviews, setDatasetPreviews] = useState<Record<string, DatasetPreview>>({});
+  const datasetPreviewsRef = useRef<Record<string, DatasetPreview>>({});
+  const previewLoadingRef = useRef(false);
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
+  const isDashboardEntry = searchParams.get("entry") === "dashboard";
 
   const selectedDatasetInfo = useMemo(
     () => datasets.find((dataset) => dataset.name === selectedDataset) || null,
@@ -124,6 +133,62 @@ export default function DataSelectionPage() {
     }
   }, [loadDatasets, loadSavedProfiles]);
 
+  useEffect(() => {
+    let mounted = true;
+    import("chartjs-plugin-zoom")
+      .then((zoomPlugin) => {
+        ChartJS.register(zoomPlugin.default);
+        if (mounted) {
+          setZoomReady(true);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load zoom plugin:", error);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    datasetPreviewsRef.current = datasetPreviews;
+  }, [datasetPreviews]);
+
+  useEffect(() => {
+    if (datasets.length === 0 || previewLoadingRef.current) return;
+    let cancelled = false;
+    previewLoadingRef.current = true;
+
+    const loadPreviews = async () => {
+      for (const dataset of datasets) {
+        if (cancelled) {
+          previewLoadingRef.current = false;
+          return;
+        }
+        if (datasetPreviewsRef.current[dataset.name]) continue;
+        try {
+          const res = await fetch(
+            `${apiBase}/dataset-preview?name=${encodeURIComponent(dataset.name)}&limit=50&sample=120`,
+          );
+          const data = await res.json();
+          if (!cancelled) {
+            setDatasetPreviews((prev) => ({ ...prev, [dataset.name]: data }));
+          }
+        } catch (error) {
+          console.error("Failed to fetch preview:", error);
+        }
+      }
+      previewLoadingRef.current = false;
+    };
+
+    loadPreviews();
+    return () => {
+      cancelled = true;
+      previewLoadingRef.current = false;
+    };
+  }, [apiBase, datasets]);
+
   // Update initial equity when portfolio is selected
   useEffect(() => {
     if (usePortfolio && selectedPortfolioId) {
@@ -138,7 +203,13 @@ export default function DataSelectionPage() {
     }
   }, [usePortfolio, selectedPortfolioId, portfolios]);
 
-  const handleSelectDataset = async (datasetName: string) => {
+  useEffect(() => {
+    if (!isDashboardEntry) return;
+    setUsePortfolio(false);
+    setSelectedPortfolioId(null);
+  }, [isDashboardEntry]);
+
+  const handleSelectDataset = useCallback(async (datasetName: string) => {
     setSelectedDataset(datasetName);
     setLoadingPreview(true);
     setStartMarkerIndex(null);
@@ -146,7 +217,7 @@ export default function DataSelectionPage() {
 
     try {
       const res = await fetch(
-        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=1000`,
+        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=1000&sample=${FULL_SERIES_SAMPLE}`,
       );
       const data = await res.json();
       setPreviewData(data);
@@ -155,29 +226,30 @@ export default function DataSelectionPage() {
     } finally {
       setLoadingPreview(false);
     }
-  };
+  }, [apiBase]);
 
-  const handleDatasetHover = async (datasetName: string) => {
-    setHoveredDataset(datasetName);
-    setLoadingHoverPreview(true);
-
-    try {
-      const res = await fetch(
-        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=50`,
-      );
-      const data = await res.json();
-      setHoverPreviewData(data);
-    } catch (error) {
-      console.error("Failed to fetch hover preview:", error);
-    } finally {
-      setLoadingHoverPreview(false);
+  const resetMarkers = useCallback(() => {
+    setStartMarkerIndex(null);
+    setEndMarkerIndex(null);
+    // Force chart update
+    if (chartRef.current) {
+      chartRef.current.update();
     }
-  };
+  }, []);
 
-  const handleDatasetHoverEnd = () => {
-    setHoveredDataset(null);
-    setHoverPreviewData(null);
-  };
+  const handleResetZoom = useCallback(() => {
+    if (!zoomReady || !chartRef.current) return;
+    chartRef.current.resetZoom();
+  }, [zoomReady]);
+
+  useEffect(() => {
+    if (selectedDataset || datasets.length === 0) return;
+    const stored = localStorage.getItem("priorsystems:selected-dataset");
+    if (!stored) return;
+    if (datasets.some((dataset) => dataset.name === stored)) {
+      handleSelectDataset(stored);
+    }
+  }, [datasets, selectedDataset, handleSelectDataset]);
 
   const handleLoadProfile = (profile: DataSetProfile) => {
     // Find the dataset
@@ -188,13 +260,12 @@ export default function DataSelectionPage() {
         setStartMarkerIndex(profile.startIndex);
         setEndMarkerIndex(profile.endIndex);
         setInitialEquity(profile.initialEquity);
-        setShowSavedProfiles(false);
       });
     }
   };
 
   const handleSaveAndContinue = () => {
-    if (!selectedDataset || startMarkerIndex === null || endMarkerIndex === null || !previewData) {
+    if (!selectedDataset || startMarkerIndex === null || endMarkerIndex === null || previewSeries.length === 0) {
       alert("Please select a dataset and place both start and end markers on the chart.");
       return;
     }
@@ -209,14 +280,14 @@ export default function DataSelectionPage() {
       return;
     }
 
-    // Get the date values from preview data
-    const startRow = previewData.head[startMarkerIndex];
-    const endRow = previewData.head[endMarkerIndex];
-    const dateCol = previewData.columns.find(
-      (col) => col.toLowerCase() === "date" || col.toLowerCase() === "timestamp"
-    );
-    const startDate = dateCol ? String(startRow[dateCol]) : "";
-    const endDate = dateCol ? String(endRow[dateCol]) : "";
+    const startPoint = previewSeries[startMarkerIndex];
+    const endPoint = previewSeries[endMarkerIndex];
+    if (!startPoint || !endPoint) {
+      alert("Invalid range selection. Please select the dataset and try again.");
+      return;
+    }
+    const startDate = new Date(startPoint.timestamp).toISOString().slice(0, 10);
+    const endDate = new Date(endPoint.timestamp).toISOString().slice(0, 10);
 
     // Create profile
     const profile: DataSetProfile = {
@@ -225,6 +296,8 @@ export default function DataSelectionPage() {
       displayName: selectedDatasetInfo?.display_name || selectedDatasetInfo?.symbol || selectedDataset,
       startIndex: startMarkerIndex,
       endIndex: endMarkerIndex,
+      startTimestamp: startPoint.timestamp,
+      endTimestamp: endPoint.timestamp,
       startDate,
       endDate,
       initialEquity,
@@ -249,7 +322,7 @@ export default function DataSelectionPage() {
     }
   };
 
-  const handleChartClick = (event: any, chartElements: any[]) => {
+  const handleChartClick = (_event: any, chartElements: any[]) => {
     if (!previewData || loadingPreview || !chartElements || chartElements.length === 0) {
       return;
     }
@@ -257,7 +330,7 @@ export default function DataSelectionPage() {
     // Get the clicked data point index
     const index = chartElements[0].index;
 
-    if (index < 0 || index >= previewData.head.length) return;
+    if (index < 0 || index >= previewSeries.length) return;
 
     // Place markers
     if (startMarkerIndex === null) {
@@ -274,49 +347,74 @@ export default function DataSelectionPage() {
       setStartMarkerIndex(index);
       setEndMarkerIndex(null);
     }
+
+    // Force chart update to redraw markers
+    setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.update('none');
+      }
+    }, 0);
   };
 
+  const previewSeries = useMemo(() => {
+    if (!previewData) return [];
+    // Use series data if available (full dataset)
+    if (previewData.series && previewData.series.length > 0) {
+      return previewData.series;
+    }
+    // Fallback: combine head and tail if series not available
+    // Note: This fallback should rarely be used since we request full series
+    const allRows = [...(previewData.head || []), ...(previewData.tail || [])];
+    return allRows
+      .map((row, index) => {
+        const rawTs = row.timestamp ?? row.date ?? row.Date ?? index;
+        const tsNum =
+          typeof rawTs === "number"
+            ? rawTs
+            : Number.isFinite(Number(rawTs))
+              ? Number(rawTs)
+              : Date.parse(String(rawTs));
+        const closeVal = row.close ?? row.Close ?? 0;
+        const closeNum = typeof closeVal === "number" ? closeVal : Number(closeVal);
+        return {
+          timestamp: Number.isFinite(tsNum) ? tsNum : index,
+          close: Number.isFinite(closeNum) ? closeNum : 0,
+        };
+      })
+      .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close));
+  }, [previewData]);
+
+  const formatMarkerDate = useCallback(
+    (index: number | null) => {
+      if (index === null) return "Not placed";
+      const point = previewSeries[index];
+      if (!point || !Number.isFinite(point.timestamp)) return "Not placed";
+      const date = new Date(point.timestamp);
+      if (Number.isNaN(date.getTime())) return "Not placed";
+      return date.toISOString().slice(0, 10);
+    },
+    [previewSeries],
+  );
+
   const chartData = useMemo(() => {
-    if (!previewData || !previewData.head) return null;
+    if (previewSeries.length === 0) return null;
 
-    const closeData = previewData.head.map((row) => row.close || row.Close || 0);
-
-    // Get date labels from the data
-    const dateCol = previewData.columns.find(
-      (col) => col.toLowerCase() === "date" || col.toLowerCase() === "timestamp"
-    );
-    const labels = previewData.head.map((row, i) => {
-      if (dateCol) {
-        const dateStr = String(row[dateCol]);
-        // Format date to just show YYYY-MM-DD
-        try {
-          const date = new Date(dateStr);
-          return date.toISOString().split('T')[0];
-        } catch {
-          return dateStr;
-        }
-      }
-      return String(i);
-    });
-
-    // Create point colors and radii to highlight markers
-    const pointBackgroundColor = labels.map((_, i) => {
+    const pointBackgroundColor = previewSeries.map((_, i) => {
       if (i === startMarkerIndex) return "#3b82f6";
       if (i === endMarkerIndex) return "#ef4444";
       return "#10b981";
     });
 
-    const pointRadius = labels.map((_, i) => {
+    const pointRadius = previewSeries.map((_, i) => {
       if (i === startMarkerIndex || i === endMarkerIndex) return 8;
       return 0;
     });
 
     return {
-      labels,
       datasets: [
         {
           label: "Close Price",
-          data: closeData,
+          data: previewSeries.map((point) => ({ x: point.timestamp, y: point.close })),
           borderColor: "#10b981",
           borderWidth: 2,
           pointRadius,
@@ -328,7 +426,7 @@ export default function DataSelectionPage() {
         },
       ],
     };
-  }, [previewData, startMarkerIndex, endMarkerIndex]);
+  }, [previewSeries, startMarkerIndex, endMarkerIndex]);
 
   // Plugin to draw vertical lines at markers
   const verticalLinePlugin = useMemo(() => ({
@@ -341,59 +439,65 @@ export default function DataSelectionPage() {
 
       // Draw start marker line
       if (startMarkerIndex !== null) {
-        const x = scales.x.getPixelForValue(startMarkerIndex);
+        const startPoint = previewSeries[startMarkerIndex];
+        if (startPoint) {
+          const x = scales.x.getPixelForValue(startPoint.timestamp);
 
-        // Draw vertical line
-        ctx.strokeStyle = "#3b82f6";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 4]);
-        ctx.globalAlpha = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(x, chartArea.top);
-        ctx.lineTo(x, chartArea.bottom);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          // Draw vertical line
+          ctx.strokeStyle = "#3b82f6";
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([8, 4]);
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(x, chartArea.top);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
 
-        // Draw label background and text
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#3b82f6";
-        ctx.fillRect(x - 28, chartArea.top - 2, 56, 18);
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 11px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("START", x, chartArea.top + 7);
+          // Draw label background and text
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#3b82f6";
+          ctx.fillRect(x - 28, chartArea.top - 2, 56, 18);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("START", x, chartArea.top + 7);
+        }
       }
 
       // Draw end marker line
       if (endMarkerIndex !== null) {
-        const x = scales.x.getPixelForValue(endMarkerIndex);
+        const endPoint = previewSeries[endMarkerIndex];
+        if (endPoint) {
+          const x = scales.x.getPixelForValue(endPoint.timestamp);
 
-        // Draw vertical line
-        ctx.strokeStyle = "#ef4444";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 4]);
-        ctx.globalAlpha = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(x, chartArea.top);
-        ctx.lineTo(x, chartArea.bottom);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          // Draw vertical line
+          ctx.strokeStyle = "#ef4444";
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([8, 4]);
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(x, chartArea.top);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
 
-        // Draw label background and text
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#ef4444";
-        ctx.fillRect(x - 22, chartArea.top - 2, 44, 18);
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 11px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("END", x, chartArea.top + 7);
+          // Draw label background and text
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#ef4444";
+          ctx.fillRect(x - 22, chartArea.top - 2, 44, 18);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("END", x, chartArea.top + 7);
+        }
       }
 
       ctx.restore();
     },
-  }), [startMarkerIndex, endMarkerIndex]);
+  }), [endMarkerIndex, previewSeries, startMarkerIndex]);
 
   const chartOptions = useMemo(() => {
     return {
@@ -414,12 +518,8 @@ export default function DataSelectionPage() {
             label: (context: any) => {
               const value = context.parsed.y;
               const index = context.dataIndex;
-              if (!previewData) return "";
-              const row = previewData.head[index];
-              const dateCol = previewData.columns.find(
-                (col) => col.toLowerCase() === "date" || col.toLowerCase() === "timestamp"
-              );
-              const date = dateCol ? String(row[dateCol]) : "";
+              if (!previewSeries[index]) return "";
+              const date = new Date(previewSeries[index].timestamp).toISOString().slice(0, 10);
               let marker = "";
               if (index === startMarkerIndex) marker = " [START]";
               if (index === endMarkerIndex) marker = " [END]";
@@ -427,27 +527,70 @@ export default function DataSelectionPage() {
             },
           },
         },
+        ...(zoomReady
+          ? {
+              zoom: {
+                zoom: {
+                  wheel: {
+                    enabled: true,
+                  },
+                  pinch: {
+                    enabled: true,
+                  },
+                  mode: "x" as const,
+                },
+                pan: {
+                  enabled: true,
+                  mode: "x" as const,
+                  modifierKey: "shift" as const,
+                },
+                limits: {
+                  x: { min: "original" as const, max: "original" as const },
+                },
+              },
+            }
+          : {}),
       },
       scales: {
         x: {
           display: true,
+          type: "linear" as const,
           grid: { color: "#1f2937" },
+          min: previewSeries.length > 0 ? previewSeries[0].timestamp : undefined,
+          max: previewSeries.length > 0 ? previewSeries[previewSeries.length - 1].timestamp : undefined,
+          title: {
+            display: true,
+            text: "Date",
+            color: "#9ca3af",
+            font: { size: 12, weight: "bold" as const },
+          },
           ticks: {
             color: "#9ca3af",
             maxTicksLimit: 8,
             autoSkip: true,
             maxRotation: 45,
             minRotation: 0,
+            callback: function(value: string | number) {
+              const ts = typeof value === "number" ? value : Number(value);
+              if (!Number.isFinite(ts)) return String(value);
+              return new Date(ts).toISOString().slice(0, 10);
+            },
           },
         },
         y: {
           display: true,
+          title: {
+            display: true,
+            text: "Price (USD)",
+            color: "#9ca3af",
+            font: { size: 12, weight: "bold" as const },
+          },
           grid: { color: "#1f2937" },
           ticks: { color: "#9ca3af" },
         },
       },
     };
-  }, [handleChartClick, previewData, startMarkerIndex, endMarkerIndex]);
+  }, [handleChartClick, previewSeries, startMarkerIndex, endMarkerIndex, zoomReady]);
 
   const getDatasetName = (dataset: DatasetInfo) =>
     dataset.display_name || dataset.symbol || dataset.name;
@@ -509,13 +652,15 @@ export default function DataSelectionPage() {
               <div className="space-y-2 max-h-96 overflow-y-auto scrollbar-hide">
                 {datasets.map((dataset) => {
                   const isSelected = selectedDataset === dataset.name;
-                  const isHovered = hoveredDataset === dataset.name;
+                  const preview = datasetPreviews[dataset.name];
+                  const previewPoints =
+                    preview?.series && preview.series.length > 0
+                      ? preview.series.map((point) => point.close)
+                      : preview?.head?.map((row) => row.close || row.Close || 0) || [];
                   return (
                     <div key={dataset.name} className="relative">
                       <button
                         onClick={() => handleSelectDataset(dataset.name)}
-                        onMouseEnter={() => handleDatasetHover(dataset.name)}
-                        onMouseLeave={handleDatasetHoverEnd}
                         className={`w-full p-4 rounded-lg border text-left transition-all ${
                           isSelected
                             ? "bg-white/10 border-white/50"
@@ -530,16 +675,16 @@ export default function DataSelectionPage() {
                         <p className="text-sm text-white font-medium">{getDatasetName(dataset)}</p>
                         <p className="text-xs text-gray-500">{getDatasetRange(dataset)}</p>
 
-                        {/* Mini chart preview on hover */}
-                        {isHovered && hoverPreviewData && hoverPreviewData.head && hoverPreviewData.head.length > 0 && (
+                        {/* Mini chart preview */}
+                        {previewPoints.length > 0 && (
                           <div className="mt-2 h-16 bg-black/50 rounded-md p-1 border border-gray-700/50">
                             <Line
                               data={{
-                                labels: hoverPreviewData.head.map((_, i) => i),
+                                labels: previewPoints.map((_, i) => i),
                                 datasets: [
                                   {
                                     label: "Close",
-                                    data: hoverPreviewData.head.map((row) => row.close || row.Close || 0),
+                                    data: previewPoints,
                                     borderColor: "#10b981",
                                     borderWidth: 1,
                                     pointRadius: 0,
@@ -563,9 +708,9 @@ export default function DataSelectionPage() {
                             />
                           </div>
                         )}
-                        {isHovered && loadingHoverPreview && (
+                        {previewPoints.length === 0 && (
                           <div className="mt-2 h-16 bg-black/50 rounded-md p-1 border border-gray-700/50 flex items-center justify-center">
-                            <span className="text-[10px] text-gray-500">Loading...</span>
+                            <span className="text-[10px] text-gray-500">Loading preview...</span>
                           </div>
                         )}
                       </button>
@@ -588,7 +733,7 @@ export default function DataSelectionPage() {
                   </button>
                 </div>
                 {showSavedProfiles && (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                  <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-hide">
                     {savedProfiles.map((profile) => (
                       <button
                         key={profile.id}
@@ -612,17 +757,24 @@ export default function DataSelectionPage() {
             <div className="rounded-xl border border-gray-800/50 bg-gray-900/40 p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-white">Price Chart - Click to Place Markers</h3>
-                {(startMarkerIndex !== null || endMarkerIndex !== null) && (
-                  <button
-                    onClick={() => {
-                      setStartMarkerIndex(null);
-                      setEndMarkerIndex(null);
-                    }}
-                    className="text-xs text-gray-400 hover:text-white"
-                  >
-                    Reset Markers
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  {zoomReady && (
+                    <button
+                      onClick={handleResetZoom}
+                      className="text-xs text-gray-400 hover:text-white"
+                    >
+                      Reset Zoom
+                    </button>
+                  )}
+                  {(startMarkerIndex !== null || endMarkerIndex !== null) && (
+                    <button
+                      onClick={resetMarkers}
+                      className="text-xs text-gray-400 hover:text-white"
+                    >
+                      Reset Markers
+                    </button>
+                  )}
+                </div>
               </div>
 
               {!selectedDataset ? (
@@ -634,8 +786,41 @@ export default function DataSelectionPage() {
                   <p className="text-gray-400">Loading chart...</p>
                 </div>
               ) : chartData ? (
-                <div className="h-96 bg-black/30 rounded-lg p-4">
-                  <Line data={chartData} options={chartOptions} plugins={[verticalLinePlugin]} />
+                <div>
+                  <div className="h-96 bg-black/30 rounded-lg p-4">
+                    <Line
+                      key={selectedDataset}
+                      ref={chartRef}
+                      data={chartData}
+                      options={chartOptions}
+                      plugins={[verticalLinePlugin]}
+                    />
+                  </div>
+                  {/* Marker Instruction */}
+                  <div className="mt-2 flex items-center justify-center gap-2 text-sm">
+                    {startMarkerIndex === null ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-950 border border-blue-800">
+                        <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+                        <span className="text-blue-300 font-semibold">Click to place START marker</span>
+                      </div>
+                    ) : endMarkerIndex === null ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-950 border border-red-800">
+                        <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></div>
+                        <span className="text-red-300 font-semibold">Click to place END marker</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={resetMarkers}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-950 border border-green-800 hover:bg-green-900/70 transition"
+                      >
+                        <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span className="text-green-300 font-semibold">Markers placed • Click to reset</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="h-96 flex items-center justify-center border border-gray-800/50 rounded-lg bg-black/30">
@@ -647,13 +832,13 @@ export default function DataSelectionPage() {
                 <div className="p-3 rounded-lg bg-blue-950/20 border border-blue-900/30">
                   <p className="text-xs text-blue-400 mb-1">Start Marker</p>
                   <p className="text-sm text-white font-medium">
-                    {startMarkerIndex !== null ? `Index ${startMarkerIndex}` : "Not placed"}
+                    {formatMarkerDate(startMarkerIndex)}
                   </p>
                 </div>
                 <div className="p-3 rounded-lg bg-red-950/20 border border-red-900/30">
                   <p className="text-xs text-red-400 mb-1">End Marker</p>
                   <p className="text-sm text-white font-medium">
-                    {endMarkerIndex !== null ? `Index ${endMarkerIndex}` : "Not placed"}
+                    {formatMarkerDate(endMarkerIndex)}
                   </p>
                 </div>
               </div>
@@ -664,50 +849,54 @@ export default function DataSelectionPage() {
               <h3 className="text-lg font-semibold text-white mb-4">Initial Configuration</h3>
 
               <div className="space-y-4">
-                {/* Portfolio Selection Toggle */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-950 border border-gray-800">
-                  <span className="text-sm text-gray-300">Use Portfolio Equity</span>
-                  <button
-                    onClick={() => {
-                      setUsePortfolio(!usePortfolio);
-                      if (!usePortfolio && portfolios.length > 0) {
-                        setSelectedPortfolioId(portfolios[0].id);
-                      }
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                      usePortfolio
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    {usePortfolio ? 'ON' : 'OFF'}
-                  </button>
-                </div>
+                {!isDashboardEntry && (
+                  <>
+                    {/* Portfolio Selection Toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-gray-950 border border-gray-800">
+                      <span className="text-sm text-gray-300">Use Portfolio Equity</span>
+                      <button
+                        onClick={() => {
+                          setUsePortfolio(!usePortfolio);
+                          if (!usePortfolio && portfolios.length > 0) {
+                            setSelectedPortfolioId(portfolios[0].id);
+                          }
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                          usePortfolio
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                        }`}
+                      >
+                        {usePortfolio ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
 
-                {/* Portfolio Selector */}
-                {usePortfolio && portfolios.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Select Portfolio
-                    </label>
-                    <select
-                      value={selectedPortfolioId || ""}
-                      onChange={(e) => setSelectedPortfolioId(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-700 bg-gray-950 text-white focus:border-purple-500 focus:outline-none"
-                    >
-                      {portfolios.map((portfolio) => (
-                        <option key={portfolio.id} value={portfolio.id}>
-                          {portfolio.name} (${(portfolio.cash + portfolio.holdings.reduce(
-                            (sum: number, h: any) => sum + (h.currentValue || h.shares * h.avgCost),
-                            0
-                          )).toLocaleString()})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-2 text-xs text-gray-500">
-                      Portfolio equity will be used as starting capital.
-                    </p>
-                  </div>
+                    {/* Portfolio Selector */}
+                    {usePortfolio && portfolios.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Select Portfolio
+                        </label>
+                        <select
+                          value={selectedPortfolioId || ""}
+                          onChange={(e) => setSelectedPortfolioId(e.target.value)}
+                          className="w-full px-4 py-3 rounded-lg border border-gray-700 bg-gray-950 text-white focus:border-purple-500 focus:outline-none"
+                        >
+                          {portfolios.map((portfolio) => (
+                            <option key={portfolio.id} value={portfolio.id}>
+                              {portfolio.name} (${(portfolio.cash + portfolio.holdings.reduce(
+                                (sum: number, h: any) => sum + (h.currentValue || h.shares * h.avgCost),
+                                0
+                              )).toLocaleString()})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-2 text-xs text-gray-500">
+                          Portfolio equity will be used as starting capital.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Initial Equity Input */}
@@ -762,5 +951,17 @@ export default function DataSelectionPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DataSelectionPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-gray-400">Loading...</div>
+      </div>
+    }>
+      <DataSelectionPageContent />
+    </Suspense>
   );
 }

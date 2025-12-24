@@ -120,6 +120,14 @@ interface Portfolio {
   cash: number;
   createdAt: string;
   updatedAt: string;
+  notes?: string;
+  tags?: string[];
+  targetAllocations?: Record<string, number>; // symbol -> target percentage
+  performanceHistory?: Array<{
+    timestamp: string;
+    equity: number;
+    holdings: PortfolioHolding[];
+  }>;
 }
 
 export default function PortfolioPage() {
@@ -527,6 +535,65 @@ export default function PortfolioPage() {
           >
             {showComparison ? 'Hide Comparison' : 'Compare Portfolios'}
           </button>
+
+          {/* Export/Import Buttons */}
+          <button
+            onClick={() => {
+              if (!activePortfolio) return;
+              const dataStr = JSON.stringify(activePortfolio, null, 2);
+              const blob = new Blob([dataStr], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `portfolio-${activePortfolio.name.toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="px-4 py-2 rounded-lg bg-gray-800 text-white hover:bg-gray-700 transition text-sm"
+          >
+            Export
+          </button>
+
+          <button
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.json';
+              input.onchange = (e: any) => {
+                const file = e.target?.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  try {
+                    const imported = JSON.parse(event.target?.result as string) as Portfolio;
+                    // Generate new ID to avoid conflicts
+                    const newPortfolio: Portfolio = {
+                      ...imported,
+                      id: crypto.randomUUID(),
+                      name: `${imported.name} (Imported)`,
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    };
+                    const updatedPortfolios = [...portfolios, newPortfolio];
+                    setPortfolios(updatedPortfolios);
+                    localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
+                    setActivePortfolioId(newPortfolio.id);
+                    setHoldings(newPortfolio.holdings);
+                    setCash(newPortfolio.cash);
+                    localStorage.setItem('priorsystems:active-portfolio-id', newPortfolio.id);
+                    alert('Portfolio imported successfully!');
+                  } catch (error) {
+                    alert('Failed to import portfolio. Please check the file format.');
+                  }
+                };
+                reader.readAsText(file);
+              };
+              input.click();
+            }}
+            className="px-4 py-2 rounded-lg bg-gray-800 text-white hover:bg-gray-700 transition text-sm"
+          >
+            Import
+          </button>
         </div>
       </div>
 
@@ -829,6 +896,99 @@ export default function PortfolioPage() {
 
         {/* Sidebar - Add Holdings */}
         <div className="space-y-6">
+          {/* Portfolio Settings */}
+          {activePortfolio && (
+            <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <h3 className="text-lg font-bold text-white">Portfolio Settings</h3>
+              </div>
+
+              <div className="space-y-3">
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Notes</label>
+                  <textarea
+                    value={activePortfolio.notes || ''}
+                    onChange={(e) => {
+                      const updatedPortfolios = portfolios.map(p =>
+                        p.id === activePortfolioId
+                          ? { ...p, notes: e.target.value, updatedAt: new Date().toISOString() }
+                          : p
+                      );
+                      setPortfolios(updatedPortfolios);
+                      localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
+                    }}
+                    placeholder="Add notes about this portfolio..."
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-purple-500 resize-none"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Tags (comma-separated)</label>
+                  <input
+                    type="text"
+                    value={activePortfolio.tags?.join(', ') || ''}
+                    onChange={(e) => {
+                      const tags = e.target.value.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                      const updatedPortfolios = portfolios.map(p =>
+                        p.id === activePortfolioId
+                          ? { ...p, tags, updatedAt: new Date().toISOString() }
+                          : p
+                      );
+                      setPortfolios(updatedPortfolios);
+                      localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
+                    }}
+                    placeholder="long-term, growth, tech"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+                  />
+                  {activePortfolio.tags && activePortfolio.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {activePortfolio.tags.map((tag, idx) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-purple-900 border border-purple-700 text-xs text-purple-300">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Snapshot Button */}
+                <button
+                  onClick={() => {
+                    const snapshot = {
+                      timestamp: new Date().toISOString(),
+                      equity: totalEquity,
+                      holdings: holdings.map(h => ({ ...h })),
+                    };
+                    const history = activePortfolio.performanceHistory || [];
+                    const updatedPortfolios = portfolios.map(p =>
+                      p.id === activePortfolioId
+                        ? { ...p, performanceHistory: [...history, snapshot], updatedAt: new Date().toISOString() }
+                        : p
+                    );
+                    setPortfolios(updatedPortfolios);
+                    localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
+                    alert('Performance snapshot saved!');
+                  }}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-800 text-white hover:bg-gray-700 transition text-xs font-semibold"
+                >
+                  Save Performance Snapshot
+                </button>
+                {activePortfolio.performanceHistory && activePortfolio.performanceHistory.length > 0 && (
+                  <div className="text-xs text-gray-500">
+                    {activePortfolio.performanceHistory.length} snapshot(s) saved
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Timeline Toggle */}
           <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
             <div className="flex items-center justify-between mb-4">

@@ -14,6 +14,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
+import "@/utils/nativeDateAdapter";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
@@ -47,6 +48,7 @@ interface DatasetPreview {
   tail: DatasetRow[];
   total_rows: number;
   columns: string[];
+  series?: { timestamp: number; close: number }[];
 }
 
 type DownloadJob = {
@@ -117,6 +119,7 @@ const extractDateRange = (filename: string) => {
 };
 
 const PREVIEW_LIMIT = 50;
+const PREVIEW_SAMPLE = 400;
 
 export default function DatasetsPage() {
   const router = useRouter();
@@ -167,6 +170,25 @@ export default function DatasetsPage() {
     );
   }, [popularSearch]);
 
+  const previewSeries = useMemo(() => {
+    if (!previewData) return [];
+    if (previewData.series && previewData.series.length > 0) {
+      return previewData.series;
+    }
+    return previewData.head
+      .map((row, index) => {
+        const rawTs = row.timestamp ?? row.date ?? row.Date ?? index;
+        const tsNum = typeof rawTs === "number" ? rawTs : Number(rawTs);
+        const closeVal = row.close ?? row.Close ?? 0;
+        const closeNum = typeof closeVal === "number" ? closeVal : Number(closeVal);
+        return {
+          timestamp: Number.isFinite(tsNum) ? tsNum : index,
+          close: Number.isFinite(closeNum) ? closeNum : 0,
+        };
+      })
+      .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close));
+  }, [previewData]);
+
   const queueProgress = useMemo(() => {
     if (!downloadQueue.length) return 0;
     const completed = downloadQueue.filter((item) => item.status === "success" || item.status === "error").length;
@@ -211,7 +233,7 @@ export default function DatasetsPage() {
 
       // Fetch metadata with some preview rows for the chart
       const res = await fetch(
-        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=${PREVIEW_LIMIT}`,
+        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=${PREVIEW_LIMIT}&sample=${PREVIEW_SAMPLE}`,
       );
       const data = await res.json();
       const totalRows = typeof selected?.rows === "number" ? selected.rows : Number(data.total_rows ?? 0) || 0;
@@ -233,9 +255,8 @@ export default function DatasetsPage() {
 
   const handleContinue = () => {
     if (selectedDataset) {
-      // Store selected dataset in localStorage
       localStorage.setItem("priorsystems:selected-dataset", selectedDataset);
-      router.push("/backtest");
+      router.push("/data-selection");
     }
   };
 
@@ -596,21 +617,24 @@ export default function DatasetsPage() {
                     </div>
 
                     {/* Mini Chart Preview */}
-                    {previewData && previewData.head && previewData.head.length > 0 && (
+                    {previewSeries.length > 0 && (
                       <div className="space-y-2">
                         <h3 className="text-white font-semibold text-sm">Price Preview</h3>
                         <div className="h-32 bg-black/30 rounded-lg p-2">
                           <Line
                             data={{
-                              labels: previewData.head.map((_, i) => i),
                               datasets: [
                                 {
                                   label: "Close",
-                                  data: previewData.head.map((row) => row.close || row.Close || 0),
+                                  data: previewSeries.map((point) => ({
+                                    x: point.timestamp,
+                                    y: point.close,
+                                  })),
                                   borderColor: "#10b981",
                                   borderWidth: 1.5,
                                   pointRadius: 0,
                                   tension: 0.1,
+                                  parsing: false,
                                   fill: false,
                                 },
                               ],
@@ -623,9 +647,29 @@ export default function DatasetsPage() {
                                 tooltip: { enabled: false },
                               },
                               scales: {
-                                x: { display: false },
+                                x: {
+                                  type: "time",
+                                  display: true,
+                                  grid: { display: false },
+                                  ticks: {
+                                    color: "#6b7280",
+                                    font: { size: 9 },
+                                    maxTicksLimit: 6,
+                                    callback: (value) => {
+                                      const ts = typeof value === "number" ? value : Number(value);
+                                      if (!Number.isFinite(ts)) return String(value);
+                                      return new Date(ts).toISOString().slice(0, 10);
+                                    },
+                                  },
+                                },
                                 y: {
                                   display: true,
+                                  title: {
+                                    display: true,
+                                    text: "Price (USD)",
+                                    color: "#6b7280",
+                                    font: { size: 10, weight: "bold" },
+                                  },
                                   grid: { display: false },
                                   ticks: {
                                     color: "#6b7280",
@@ -638,7 +682,7 @@ export default function DatasetsPage() {
                           />
                         </div>
                         <p className="text-[10px] uppercase tracking-wide text-gray-500">
-                          Showing first {PREVIEW_LIMIT.toLocaleString()} rows of the file
+                          Showing a sampled view across the full dataset
                         </p>
                       </div>
                     )}
@@ -647,7 +691,7 @@ export default function DatasetsPage() {
                       onClick={handleContinue}
                       className="w-full px-6 py-3 bg-white hover:bg-gray-200 text-black font-semibold rounded-lg transition-all duration-200"
                     >
-                      Continue to Backtesting
+                      Return to Dataset Selection
                     </button>
                   </div>
                 ) : null}

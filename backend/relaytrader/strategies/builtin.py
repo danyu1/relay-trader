@@ -35,10 +35,19 @@ class MeanReversionZScore(Strategy):
         entry = float(self.params.get("entry_z", 2.0))
         exit_z = float(self.params.get("exit_z", 0.5))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
 
         z = self.zscore(bar.symbol, "close", lookback)
         if z is None:
             return
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if z > entry and pos > 0:
@@ -62,6 +71,8 @@ class SmaCross(Strategy):
         fast = int(self.params.get("fast", 10))
         slow = int(self.params.get("slow", 40))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
+
         if fast >= slow:
             return
 
@@ -70,6 +81,14 @@ class SmaCross(Strategy):
             return
         fast_ma = sum(history_fast[-fast:]) / fast
         slow_ma = sum(history_fast) / slow
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if fast_ma > slow_ma and pos <= 0:
@@ -92,6 +111,7 @@ class RsiReversion(Strategy):
         overbought = float(self.params.get("overbought", 70))
         oversold = float(self.params.get("oversold", 30))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
 
         closes = list(self.context.get_history(bar.symbol, "close", length + 1))
         if len(closes) < length + 1:
@@ -109,6 +129,14 @@ class RsiReversion(Strategy):
         else:
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if rsi < oversold and pos <= 0:
@@ -135,6 +163,7 @@ class BollingerMeanReversion(Strategy):
         lookback = int(self.params.get("lookback", 20))
         dev = float(self.params.get("num_std", 2.0))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
 
         prices = list(self.context.get_history(bar.symbol, "close", lookback))
         if len(prices) < lookback:
@@ -144,6 +173,14 @@ class BollingerMeanReversion(Strategy):
         std = variance ** 0.5
         upper = mean + dev * std
         lower = mean - dev * std
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if bar.close < lower and pos <= 0:
@@ -169,6 +206,7 @@ class DonchianBreakout(Strategy):
     def on_bar(self, bar: Bar) -> None:
         lookback = int(self.params.get("lookback", 55))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
 
         highs = list(self.context.get_history(bar.symbol, "high", lookback + 1))
         lows = list(self.context.get_history(bar.symbol, "low", lookback + 1))
@@ -176,6 +214,14 @@ class DonchianBreakout(Strategy):
             return
         upper = max(highs[:-1])
         lower = min(lows[:-1])
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if bar.high > upper and pos <= 0:
@@ -191,17 +237,27 @@ class DonchianBreakout(Strategy):
 class PercentMomentum(Strategy):
     """
     Compare current price to lookback percentage change.
+    Uses dynamic position sizing based on available capital.
     """
 
     def on_bar(self, bar: Bar) -> None:
         lookback = int(self.params.get("lookback", 20))
         threshold = float(self.params.get("threshold", 0.02))
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
 
         closes = list(self.context.get_history(bar.symbol, "close", lookback + 1))
         if len(closes) < lookback + 1:
             return
         pct_change = (closes[-1] / closes[0]) - 1
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
 
         pos = self.context.get_position_qty(bar.symbol)
         if pct_change > threshold and pos <= 0:
@@ -232,6 +288,16 @@ class BuyAndHold(Strategy):
         if self.executed:
             return
         qty = float(self.params.get("qty", 1))
+        position_pct = float(self.params.get("position_pct", 100.0))
+
+        # Calculate position size based on percentage of capital
+        if position_pct < 100:
+            cash = self.context.get_cash()
+            max_position_value = cash * (position_pct / 100.0)
+            qty = int(max_position_value / bar.close) if bar.close > 0 else 0
+            if qty <= 0:
+                return
+
         self.buy(bar.symbol, qty, OrderType.MARKET)
         self.executed = True
 
@@ -245,6 +311,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
           StrategyParam("lookback", "int", 50, min=10, max=200),
           StrategyParam("entry_z", "float", 2.0, min=0.5, max=5.0),
           StrategyParam("exit_z", "float", 0.5, min=0.0, max=2.0),
+          StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
           StrategyParam("qty", "float", 1.0, min=0.1, max=1000000),
         ],
         cls=MeanReversionZScore,
@@ -256,6 +323,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         params=[
           StrategyParam("fast", "int", 10, min=2, max=200),
           StrategyParam("slow", "int", 40, min=5, max=400),
+          StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
           StrategyParam("qty", "float", 1.0, min=0.1, max=1000000),
         ],
         cls=SmaCross,
@@ -268,6 +336,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
             StrategyParam("length", "int", 14, min=5, max=50),
             StrategyParam("oversold", "float", 30.0, min=5, max=45),
             StrategyParam("overbought", "float", 70.0, min=55, max=95),
+            StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
             StrategyParam("qty", "float", 1.0, min=0.5, max=10),
         ],
         cls=RsiReversion,
@@ -279,6 +348,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         params=[
             StrategyParam("lookback", "int", 20, min=10, max=200),
             StrategyParam("num_std", "float", 2.0, min=0.5, max=4.0),
+            StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
             StrategyParam("qty", "float", 1.0, min=0.5, max=10),
         ],
         cls=BollingerMeanReversion,
@@ -289,6 +359,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         description="Trend-following breakout using channel highs/lows.",
         params=[
             StrategyParam("lookback", "int", 55, min=10, max=200),
+            StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
             StrategyParam("qty", "float", 1.0, min=0.5, max=10),
         ],
         cls=DonchianBreakout,
@@ -300,6 +371,7 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         params=[
             StrategyParam("lookback", "int", 20, min=5, max=200),
             StrategyParam("threshold", "float", 0.02, min=0.005, max=0.1),
+            StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
             StrategyParam("qty", "float", 1.0, min=0.5, max=10),
         ],
         cls=PercentMomentum,
@@ -308,7 +380,10 @@ BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
         id="buy_and_hold",
         name="Buy & Hold",
         description="Purchase a fixed quantity on the first bar and hold.",
-        params=[StrategyParam("qty", "float", 1.0, min=0.1, max=1000000)],
+        params=[
+            StrategyParam("position_pct", "float", 100.0, min=1.0, max=100.0),
+            StrategyParam("qty", "float", 1.0, min=0.1, max=1000000)
+        ],
         cls=BuyAndHold,
     ),
 }

@@ -124,6 +124,8 @@ export default function LivePricesPage() {
   const [savedPortfolios, setSavedPortfolios] = useState<
     { id: number; name: string; savedAt: number; positionCount: number; payload?: any }[]
   >([]);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const lineStyleTimeoutRef = useRef<number | null>(null);
 
@@ -770,6 +772,45 @@ export default function LivePricesPage() {
     }
   }, []);
 
+  // Reorder positions via drag and drop
+  const reorderPositions = useCallback((fromIndex: number, toIndex: number) => {
+    setPortfolio((prev) => {
+      const newPositions = [...prev.positions];
+      const [removed] = newPositions.splice(fromIndex, 1);
+      newPositions.splice(toIndex, 0, removed);
+
+      const realPositions = newPositions.filter(p => !p.isPotential);
+      const totalValue = realPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
+      const totalCost = realPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+      const totalGainLoss = totalValue - totalCost;
+
+      return {
+        positions: newPositions,
+        totalValue,
+        totalCost,
+        totalGainLoss,
+        totalGainLossPercent: totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0,
+      };
+    });
+  }, []);
+
+  // Drag and drop handlers
+  const handleDragStart = useCallback((index: number) => {
+    setDraggedIndex(index);
+  }, []);
+
+  const handleDragOver = useCallback((index: number) => {
+    setDragOverIndex(index);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+      reorderPositions(draggedIndex, dragOverIndex);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  }, [draggedIndex, dragOverIndex, reorderPositions]);
+
   // Save portfolio with a custom name
   const savePortfolio = useCallback(
     async (name: string) => {
@@ -1169,15 +1210,24 @@ export default function LivePricesPage() {
           ) : (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {paginatedPositions.map((position) => (
-                  <StockCard
-                    key={position.id}
-                    position={position}
-                    lineColor={lineStyles[position.symbol]?.color || position.color || PRESET_COLORS[0]}
-                    onRemove={removePosition}
-                    onLineColorChange={updateLineColor}
-                  />
-                ))}
+                {paginatedPositions.map((position, index) => {
+                  const actualIndex = currentPage * CARDS_PER_PAGE + index;
+                  return (
+                    <StockCard
+                      key={position.id}
+                      position={position}
+                      index={actualIndex}
+                      lineColor={lineStyles[position.symbol]?.color || position.color || PRESET_COLORS[0]}
+                      onRemove={removePosition}
+                      onLineColorChange={updateLineColor}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragEnd={handleDragEnd}
+                      isDragging={draggedIndex === actualIndex}
+                      isDragOver={dragOverIndex === actualIndex}
+                    />
+                  );
+                })}
               </div>
 
               {/* Pagination Controls */}
@@ -1414,12 +1464,18 @@ export default function LivePricesPage() {
 
 interface StockCardProps {
   position: StockPosition;
+  index: number;
   lineColor: string;
   onRemove: (positionId: string) => void;
   onLineColorChange: (symbol: string, color: string) => void;
+  onDragStart: (index: number) => void;
+  onDragOver: (index: number) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
+  isDragOver: boolean;
 }
 
-function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCardProps) {
+function StockCard({ position, index, lineColor, onRemove, onLineColorChange, onDragStart, onDragOver, onDragEnd, isDragging, isDragOver }: StockCardProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
 
   const positionValue = position.shares * position.currentPrice;
@@ -1454,7 +1510,14 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
 
   return (
     <div
-      className="rounded-xl border p-4 relative transition-all"
+      draggable
+      onDragStart={() => onDragStart(index)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver(index);
+      }}
+      onDragEnd={onDragEnd}
+      className={`rounded-xl border p-4 relative transition-all cursor-move ${isDragging ? 'opacity-50' : ''} ${isDragOver ? 'ring-2 ring-blue-500' : ''}`}
       style={{
         borderColor: lineColor + "40",
         backgroundColor: position.isPotential ? "#8b5cf640" : position.cardColor,
@@ -2749,8 +2812,8 @@ function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-xl border border-gray-800 max-w-md w-full p-6">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold">Add Potential Stock</h3>
           <button

@@ -56,11 +56,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex h-20 items-center justify-between">
             <div className="flex items-center gap-3">
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-                <rect width="32" height="32" rx="8" fill="#0084FF"/>
-                <path d="M16 8C11.6 8 8 11.1 8 15C8 17.4 9.4 19.5 11.5 20.7L11.5 24L14.3 22.3C15 22.4 15.5 22.5 16 22.5C20.4 22.5 24 19.4 24 15.5C24 11.6 20.4 8 16 8Z" fill="white"/>
-                <path d="M13.5 13.5L16 16.5L18.5 13.5L21 16L16 21L11 16L13.5 13.5Z" fill="#0084FF"/>
-              </svg>
+              <img src="/logo.svg" alt="Prior Systems" width="32" height="32" />
               <span className="text-xl tracking-tight text-white">Prior Systems</span>
             </div>
             <div className="flex items-center gap-8">
@@ -98,11 +94,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-                <rect width="32" height="32" rx="8" fill="#0084FF"/>
-                <path d="M16 8C11.6 8 8 11.1 8 15C8 17.4 9.4 19.5 11.5 20.7L11.5 24L14.3 22.3C15 22.4 15.5 22.5 16 22.5C20.4 22.5 24 19.4 24 15.5C24 11.6 20.4 8 16 8Z" fill="white"/>
-                <path d="M13.5 13.5L16 16.5L18.5 13.5L21 16L16 21L11 16L13.5 13.5Z" fill="#0084FF"/>
-              </svg>
+              <img src="/logo.svg" alt="Prior Systems" width="24" height="24" />
               <span className="tracking-tight text-white">Prior Systems</span>
             </div>
             <p className="text-sm text-slate-500">

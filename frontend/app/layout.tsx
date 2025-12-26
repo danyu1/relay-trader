@@ -4,6 +4,11 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Prior Systems Dashboard",
   description: "Backtest trading strategies through FastAPI backend.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

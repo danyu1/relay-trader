@@ -14,7 +14,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
-import "@/utils/nativeDateAdapter";
+import "chartjs-adapter-date-fns";
 import { apiFetch } from "@/app/lib/api";
 import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
@@ -468,15 +468,15 @@ export default function DatasetsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header */}
-      <nav className="border-b border-gray-800/50 backdrop-blur-sm bg-gray-900/50">
+      <nav className="border-b border-white/5 backdrop-blur-sm bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="Prior Systems" className="h-12 w-auto" />
           </div>
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/dashboard")}
             className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
           >
             ← Back

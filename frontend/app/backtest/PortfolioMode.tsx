@@ -68,8 +68,6 @@ export default function PortfolioMode() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (authLoading) return null;
-
   // Load portfolios from the portfolio builder
   useEffect(() => {
     if (authLoading) return;
@@ -330,6 +328,10 @@ export default function PortfolioMode() {
       setLoading(false);
     }
   };
+
+  if (authLoading) {
+    return null;
+  }
 
   if (step === "select") {
     return (

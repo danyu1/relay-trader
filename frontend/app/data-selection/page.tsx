@@ -14,7 +14,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
-import "@/utils/nativeDateAdapter";
+import "chartjs-adapter-date-fns";
 import { apiFetch } from "@/app/lib/api";
 import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
@@ -81,6 +81,7 @@ function DataSelectionPageContent() {
   const [savedProfiles, setSavedProfiles] = useState<DataSetProfile[]>([]);
   const [showSavedProfiles, setShowSavedProfiles] = useState(true);
   const [activeProfileId, setActiveProfileId] = useState<number | null>(null);
+  const [loadedProfileId, setLoadedProfileId] = useState<number | null>(null);
 
   // Portfolio selection state
   const [usePortfolio, setUsePortfolio] = useState(false);
@@ -305,6 +306,7 @@ function DataSelectionPageContent() {
   const resetMarkers = useCallback(() => {
     setStartMarkerIndex(null);
     setEndMarkerIndex(null);
+    setLoadedProfileId(null); // Clear loaded profile when markers are reset
     // Force chart update
     if (chartRef.current) {
       chartRef.current.update();
@@ -351,9 +353,39 @@ function DataSelectionPageContent() {
         setStartMarkerIndex(profile.startIndex);
         setEndMarkerIndex(profile.endIndex);
         setInitialEquity(profile.initialEquity);
+        setLoadedProfileId(profile.id);
       });
     }
   }, [datasets, handleSelectDataset]);
+
+  const handleDeleteProfile = useCallback(async (profileId: number, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent loading the profile when clicking delete
+
+    if (!confirm("Are you sure you want to delete this profile?")) {
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/dataset-profiles/${profileId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to delete profile");
+      }
+
+      // Update local state
+      setSavedProfiles((prev) => prev.filter((p) => p.id !== profileId));
+
+      // If this was the active profile, clear it
+      if (activeProfileId === profileId) {
+        setActiveProfileId(null);
+      }
+    } catch (error) {
+      console.error("Failed to delete profile:", error);
+      alert("Failed to delete profile. Please try again.");
+    }
+  }, [activeProfileId]);
 
   useEffect(() => {
     if (!activeProfileId || savedProfiles.length === 0) return;
@@ -376,6 +408,25 @@ function DataSelectionPageContent() {
 
     if (initialEquity <= 0) {
       alert("Initial equity must be greater than 0.");
+      return;
+    }
+
+    // If we loaded an existing profile, just navigate to backtest without saving
+    if (loadedProfileId !== null) {
+      try {
+        await apiFetch("/user-settings/active-profile-id", {
+          method: "PUT",
+          body: JSON.stringify({ key: "active-profile-id", value: loadedProfileId }),
+        });
+        await apiFetch("/user-settings/selected-dataset", {
+          method: "PUT",
+          body: JSON.stringify({ key: "selected-dataset", value: selectedDataset }),
+        });
+        router.push("/backtest");
+      } catch (error) {
+        console.error("Failed to set active profile:", error);
+        alert("Failed to load profile. Please try again.");
+      }
       return;
     }
 
@@ -433,6 +484,9 @@ function DataSelectionPageContent() {
     const index = chartElements[0].index;
 
     if (index < 0 || index >= previewSeries.length) return;
+
+    // Clear loaded profile when manually placing markers
+    setLoadedProfileId(null);
 
     // Place markers
     if (startMarkerIndex === null) {
@@ -530,76 +584,6 @@ function DataSelectionPageContent() {
     };
   }, [previewSeries, startMarkerIndex, endMarkerIndex]);
 
-  // Plugin to draw vertical lines at markers
-  const verticalLinePlugin = useMemo(() => ({
-    id: "verticalMarkerLines",
-    afterDraw: (chart: any) => {
-      const { ctx, chartArea, scales } = chart;
-      if (!chartArea || !scales.x) return;
-
-      ctx.save();
-
-      // Draw start marker line
-      if (startMarkerIndex !== null) {
-        const startPoint = previewSeries[startMarkerIndex];
-        if (startPoint) {
-          const x = scales.x.getPixelForValue(startPoint.timestamp);
-
-          // Draw vertical line
-          ctx.strokeStyle = "#3b82f6";
-          ctx.lineWidth = 2.5;
-          ctx.setLineDash([8, 4]);
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.moveTo(x, chartArea.top);
-          ctx.lineTo(x, chartArea.bottom);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Draw label background and text
-          ctx.globalAlpha = 1;
-          ctx.fillStyle = "#3b82f6";
-          ctx.fillRect(x - 28, chartArea.top - 2, 56, 18);
-          ctx.fillStyle = "#fff";
-          ctx.font = "bold 11px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText("START", x, chartArea.top + 7);
-        }
-      }
-
-      // Draw end marker line
-      if (endMarkerIndex !== null) {
-        const endPoint = previewSeries[endMarkerIndex];
-        if (endPoint) {
-          const x = scales.x.getPixelForValue(endPoint.timestamp);
-
-          // Draw vertical line
-          ctx.strokeStyle = "#ef4444";
-          ctx.lineWidth = 2.5;
-          ctx.setLineDash([8, 4]);
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.moveTo(x, chartArea.top);
-          ctx.lineTo(x, chartArea.bottom);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Draw label background and text
-          ctx.globalAlpha = 1;
-          ctx.fillStyle = "#ef4444";
-          ctx.fillRect(x - 22, chartArea.top - 2, 44, 18);
-          ctx.fillStyle = "#fff";
-          ctx.font = "bold 11px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText("END", x, chartArea.top + 7);
-        }
-      }
-
-      ctx.restore();
-    },
-  }), [endMarkerIndex, previewSeries, startMarkerIndex]);
 
   const chartOptions = useMemo(() => {
     return {
@@ -716,9 +700,9 @@ function DataSelectionPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header */}
-      <nav className="border-b border-gray-800/50 backdrop-blur-sm bg-gray-900/50">
+      <nav className="border-b border-white/5 backdrop-blur-sm bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="Prior Systems" className="h-12 w-auto" />
@@ -841,15 +825,26 @@ function DataSelectionPageContent() {
                 {showSavedProfiles && (
                   <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-hide">
                     {savedProfiles.map((profile) => (
-                      <button
+                      <div
                         key={profile.id}
-                        onClick={() => handleLoadProfile(profile)}
-                        className="w-full p-3 rounded-lg border border-gray-800/50 bg-gray-950/50 hover:bg-gray-900/50 text-left transition-all"
+                        className="relative group"
                       >
-                        <p className="text-sm text-white font-medium">{profile.displayName}</p>
-                        <p className="text-xs text-gray-400">{profile.startDate} → {profile.endDate}</p>
-                        <p className="text-xs text-gray-500">Equity: ${profile.initialEquity.toLocaleString()}</p>
-                      </button>
+                        <button
+                          onClick={() => handleLoadProfile(profile)}
+                          className="w-full p-3 rounded-lg border border-gray-800/50 bg-gray-950/50 hover:bg-gray-900/50 text-left transition-all"
+                        >
+                          <p className="text-sm text-white font-medium pr-6">{profile.displayName}</p>
+                          <p className="text-xs text-gray-400">{profile.startDate} → {profile.endDate}</p>
+                          <p className="text-xs text-gray-500">Equity: ${profile.initialEquity.toLocaleString()}</p>
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteProfile(profile.id, e)}
+                          className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded-full bg-gray-800/80 hover:bg-red-600 text-gray-400 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                          title="Delete profile"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -899,7 +894,6 @@ function DataSelectionPageContent() {
                       ref={chartRef}
                       data={chartData}
                       options={chartOptions}
-                      plugins={[verticalLinePlugin]}
                     />
                   </div>
                   {/* Marker Instruction */}
@@ -1034,7 +1028,7 @@ function DataSelectionPageContent() {
                     disabled={!selectedDataset || startMarkerIndex === null || endMarkerIndex === null}
                     className="w-full px-6 py-4 bg-white hover:bg-gray-200 text-black font-semibold rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Save Profile & Continue to Backtest
+                    {loadedProfileId !== null ? "Start Backtesting" : "Save Profile & Continue to Backtest"}
                   </button>
                 </div>
               </div>

@@ -261,16 +261,19 @@ export default function LivePricesPage() {
     // Create clumped positions
     const clumped: StockPosition[] = [];
     grouped.forEach((positions, symbol) => {
-      if (positions.length === 1 && !positions[0].isPotential) {
-        // Only one position, no need to clump
-        clumped.push(positions[0]);
-      } else if (positions.every(p => !p.isPotential)) {
-        // Multiple real positions, clump them
-        const totalShares = positions.reduce((sum, p) => sum + p.shares, 0);
-        const totalCost = positions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+      // Separate real and potential stocks
+      const realPositions = positions.filter(p => !p.isPotential);
+      const potentialPositions = positions.filter(p => p.isPotential);
+
+      // Clump real positions if there are multiple
+      if (realPositions.length === 1) {
+        clumped.push(realPositions[0]);
+      } else if (realPositions.length > 1) {
+        const totalShares = realPositions.reduce((sum, p) => sum + p.shares, 0);
+        const totalCost = realPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
         const weightedAvgPrice = totalCost / totalShares;
-        const firstPosition = positions[0];
-        const allPurchaseDates = positions.map(p => p.purchaseDate).sort((a, b) => a - b);
+        const firstPosition = realPositions[0];
+        const allPurchaseDates = realPositions.map(p => p.purchaseDate).sort((a, b) => a - b);
 
         clumped.push({
           ...firstPosition,
@@ -280,10 +283,10 @@ export default function LivePricesPage() {
           purchaseDates: allPurchaseDates,
           purchaseDate: allPurchaseDates[0], // Earliest purchase date
         });
-      } else {
-        // Keep potential stocks separate
-        clumped.push(...positions);
       }
+
+      // Add potential stocks separately (never clump these)
+      clumped.push(...potentialPositions);
     });
 
     return clumped;
@@ -354,8 +357,10 @@ export default function LivePricesPage() {
               purchaseDates: holding.meta?.purchaseDates,
             };
           });
-          const totalValue = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
-          const totalCost = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
+          // Only include real positions in portfolio totals, exclude potential stocks
+          const realPositions = positions.filter((p: StockPosition) => !p.isPotential);
+          const totalValue = realPositions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
+          const totalCost = realPositions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
           const totalGainLoss = totalValue - totalCost;
           const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
           setPortfolio({
@@ -521,17 +526,18 @@ export default function LivePricesPage() {
         };
       });
 
-      // Recalculate portfolio totals
-      const totalValue = updatedPositions.reduce(
+      // Recalculate portfolio totals (exclude potential stocks)
+      const realUpdatedPositions = updatedPositions.filter(p => !p.isPotential);
+      const totalValue = realUpdatedPositions.reduce(
         (sum, p) => sum + p.shares * p.currentPrice,
         0
       );
-      const totalCost = updatedPositions.reduce(
+      const totalCost = realUpdatedPositions.reduce(
         (sum, p) => sum + p.shares * p.costBasis,
         0
       );
       const totalGainLoss = totalValue - totalCost;
-      const totalGainLossPercent = (totalGainLoss / totalCost) * 100;
+      const totalGainLossPercent = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
 
       setPortfolio({
         positions: updatedPositions,
@@ -634,8 +640,9 @@ export default function LivePricesPage() {
       });
 
       const updatedPositions = [...portfolio.positions, newPosition];
-      const totalValue = updatedPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
-      const totalCost = updatedPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+      const realUpdated = updatedPositions.filter(p => !p.isPotential);
+      const totalValue = realUpdated.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
+      const totalCost = realUpdated.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
       const totalGainLoss = totalValue - totalCost;
 
       setPortfolio({
@@ -643,7 +650,7 @@ export default function LivePricesPage() {
         totalValue,
         totalCost,
         totalGainLoss,
-        totalGainLossPercent: (totalGainLoss / totalCost) * 100,
+        totalGainLossPercent: totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0,
       });
 
       setShowAddDialog(false);
@@ -656,8 +663,9 @@ export default function LivePricesPage() {
   // Remove position by ID (allows removing specific positions of same stock)
   const removePosition = useCallback((positionId: string) => {
     const updatedPositions = portfolio.positions.filter((p) => p.id !== positionId);
-    const totalValue = updatedPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
-    const totalCost = updatedPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+    const realRemaining = updatedPositions.filter(p => !p.isPotential);
+    const totalValue = realRemaining.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
+    const totalCost = realRemaining.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
     const totalGainLoss = totalValue - totalCost;
 
     setPortfolio({
@@ -830,8 +838,9 @@ export default function LivePricesPage() {
         };
       });
 
-      const totalValue = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
-      const totalCost = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
+      const realLoadedPositions = positions.filter((p: StockPosition) => !p.isPotential);
+      const totalValue = realLoadedPositions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
+      const totalCost = realLoadedPositions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
       const totalGainLoss = totalValue - totalCost;
       const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
 
@@ -1006,6 +1015,81 @@ export default function LivePricesPage() {
             </div>
           </div>
         </div>
+
+        {/* Projected Portfolio Summary (if there are potential stocks) */}
+        {portfolio.positions.some(p => p.isPotential) && (() => {
+          const potentialStocks = portfolio.positions.filter(p => p.isPotential);
+
+          // Calculate projected value from potential stocks (final price at end of holding period)
+          const projectedGainsFromPotential = potentialStocks.reduce((sum, p) => {
+            if (p.historicalData.length > 0) {
+              const finalPrice = p.historicalData[p.historicalData.length - 1].price;
+              const gain = finalPrice - p.currentPrice;
+              return sum + gain;
+            }
+            return sum;
+          }, 0);
+
+          const projectedTotalValue = portfolio.totalValue + projectedGainsFromPotential;
+          const projectedTotalGainLoss = portfolio.totalGainLoss + projectedGainsFromPotential;
+          const projectedTotalGainLossPercent = portfolio.totalCost > 0
+            ? (projectedTotalGainLoss / portfolio.totalCost) * 100
+            : 0;
+
+          // Find the latest projection end date
+          const latestProjectionDate = Math.max(
+            ...potentialStocks.map(p => p.purchaseDate + (p.holdingPeriod || 0) * 24 * 60 * 60 * 1000)
+          );
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className="rounded-xl border border-purple-800 bg-purple-950/30 p-6">
+                <div className="text-sm text-purple-400 mb-1 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                  Projected Total Value
+                </div>
+                <div className="text-2xl font-bold text-purple-300">
+                  ${projectedTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-purple-500 mt-1">
+                  By {new Date(latestProjectionDate).toLocaleDateString()}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-purple-800 bg-purple-950/30 p-6">
+                <div className="text-sm text-purple-400 mb-1">Potential Gains</div>
+                <div className={`text-2xl font-bold ${projectedGainsFromPotential >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {projectedGainsFromPotential >= 0 ? "+" : ""}${projectedGainsFromPotential.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-purple-500 mt-1">
+                  From {potentialStocks.length} projection{potentialStocks.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-purple-800 bg-purple-950/30 p-6">
+                <div className="text-sm text-purple-400 mb-1">Projected Gain/Loss</div>
+                <div className={`text-2xl font-bold ${projectedTotalGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {projectedTotalGainLoss >= 0 ? "+" : ""}${projectedTotalGainLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-purple-500 mt-1">
+                  Total including projections
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-purple-800 bg-purple-950/30 p-6">
+                <div className="text-sm text-purple-400 mb-1">Projected Return</div>
+                <div className={`text-2xl font-bold ${projectedTotalGainLossPercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {projectedTotalGainLossPercent >= 0 ? "+" : ""}{projectedTotalGainLossPercent.toFixed(2)}%
+                </div>
+                <div className="text-xs text-purple-500 mt-1">
+                  With all projections
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Stock Positions */}
         <section className="mb-8">
@@ -1294,8 +1378,9 @@ export default function LivePricesPage() {
             });
 
             const updatedPositions = [...portfolio.positions, newPosition];
-            const totalValue = updatedPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
-            const totalCost = updatedPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+            const realPotentialUpdated = updatedPositions.filter(p => !p.isPotential);
+            const totalValue = realPotentialUpdated.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
+            const totalCost = realPotentialUpdated.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
             const totalGainLoss = totalValue - totalCost;
 
             setPortfolio({
@@ -1329,7 +1414,7 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
   const positionValue = position.shares * position.currentPrice;
   const positionCost = position.shares * position.costBasis;
   const positionGainLoss = positionValue - positionCost;
-  const positionGainLossPercent = (positionGainLoss / positionCost) * 100;
+  const positionGainLossPercent = positionCost > 0 ? (positionGainLoss / positionCost) * 100 : 0;
 
   // Calculate price at reference date (user-configurable date)
   const referenceDateData = position.historicalData.find(d =>
@@ -1337,9 +1422,12 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
   );
   const priceAtReference = referenceDateData?.price || position.costBasis;
 
-  // Calculate gain/loss from reference date to current date
-  const changeFromReference = position.currentPrice - priceAtReference;
-  const changePercentFromReference = (changeFromReference / priceAtReference) * 100;
+  // Calculate gain/loss from reference date to current/final date
+  const finalPrice = position.isPotential && position.historicalData.length > 0
+    ? position.historicalData[position.historicalData.length - 1].price
+    : position.currentPrice;
+  const changeFromReference = finalPrice - priceAtReference;
+  const changePercentFromReference = priceAtReference > 0 ? (changeFromReference / priceAtReference) * 100 : 0;
 
   const fontSizeScale = position.fontSize / 100;
 
@@ -1428,14 +1516,33 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
 
       {/* Price */}
       <div className="mb-3">
-        <div className="text-2xl font-bold">${position.currentPrice.toFixed(2)}</div>
+        <div className="text-2xl font-bold">
+          ${position.currentPrice.toFixed(2)}
+          {position.isPotential && finalPrice !== position.currentPrice && (
+            <span className="text-base ml-2">→ ${finalPrice.toFixed(2)}</span>
+          )}
+        </div>
         <div className={`text-sm ${changePercentFromReference >= 0 ? "text-green-400" : "text-red-400"}`}>
-          {changePercentFromReference >= 0 ? "+" : ""}{changeFromReference.toFixed(2)} ({changePercentFromReference.toFixed(2)}%) since {new Date(position.referenceDate).toLocaleDateString()}
+          {position.isPotential ? (
+            <>
+              {changePercentFromReference >= 0 ? "+" : ""}{changeFromReference.toFixed(2)} ({changePercentFromReference.toFixed(2)}%) projected over {position.holdingPeriod} days
+            </>
+          ) : (
+            <>
+              {changePercentFromReference >= 0 ? "+" : ""}{changeFromReference.toFixed(2)} ({changePercentFromReference.toFixed(2)}%) since {new Date(position.referenceDate).toLocaleDateString()}
+            </>
+          )}
         </div>
         {/* Show all purchase dates if clumped */}
-        {position.purchaseDates && position.purchaseDates.length > 1 && (
+        {!position.isPotential && position.purchaseDates && position.purchaseDates.length > 1 && (
           <div className="text-xs text-gray-400 mt-1">
             Purchased: {position.purchaseDates.map(d => new Date(d).toLocaleDateString()).join(', ')}
+          </div>
+        )}
+        {/* Show growth details for potential stocks */}
+        {position.isPotential && (
+          <div className="text-xs text-gray-400 mt-1">
+            Growth: {position.growthRate}% per {position.growthPeriod}
           </div>
         )}
       </div>
@@ -1476,27 +1583,58 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
       </div>
 
       {/* Position Details */}
-      <div className="space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-400">Shares:</span>
-          <span className="font-medium">{position.shares}</span>
+      {!position.isPotential && (
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-400">Shares:</span>
+            <span className="font-medium">{position.shares}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Cost Basis:</span>
+            <span className="font-medium">${position.costBasis.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Position Value:</span>
+            <span className="font-medium">${positionValue.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between pt-2 border-t border-gray-800">
+            <span className="text-gray-400">Gain/Loss:</span>
+            <span className={`font-bold ${positionGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {positionGainLoss >= 0 ? "+" : ""}${positionGainLoss.toFixed(2)}
+              <span className="text-xs ml-1">({positionGainLossPercent >= 0 ? "+" : ""}{positionGainLossPercent.toFixed(2)}%)</span>
+            </span>
+          </div>
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Cost Basis:</span>
-          <span className="font-medium">${position.costBasis.toFixed(2)}</span>
+      )}
+      {position.isPotential && (
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-400">Current Price:</span>
+            <span className="font-medium">${position.currentPrice.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Projected Price:</span>
+            <span className="font-medium">${finalPrice.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Holding Period:</span>
+            <span className="font-medium">{position.holdingPeriod} days</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Target Date:</span>
+            <span className="font-medium text-purple-400">
+              {new Date(position.purchaseDate + position.holdingPeriod! * 24 * 60 * 60 * 1000).toLocaleDateString()}
+            </span>
+          </div>
+          <div className="flex justify-between pt-2 border-t border-gray-800">
+            <span className="text-gray-400">Projected Gain:</span>
+            <span className={`font-bold ${changeFromReference >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {changeFromReference >= 0 ? "+" : ""}${changeFromReference.toFixed(2)}
+              <span className="text-xs ml-1">({changePercentFromReference >= 0 ? "+" : ""}{changePercentFromReference.toFixed(2)}%)</span>
+            </span>
+          </div>
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-400">Position Value:</span>
-          <span className="font-medium">${positionValue.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between pt-2 border-t border-gray-800">
-          <span className="text-gray-400">Gain/Loss:</span>
-          <span className={`font-bold ${positionGainLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {positionGainLoss >= 0 ? "+" : ""}${positionGainLoss.toFixed(2)}
-            <span className="text-xs ml-1">({positionGainLossPercent >= 0 ? "+" : ""}{positionGainLossPercent.toFixed(2)}%)</span>
-          </span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1548,30 +1686,60 @@ function PortfolioChart({ portfolio, chartView, timeRange, config, lineStyles }:
   // Build chart data based on view
   const getChartData = () => {
     if (chartView === "portfolio") {
-      // Create one dataset per unique symbol
-      const datasets = Array.from(positionsBySymbol.entries()).map(([symbol, positions]) => {
-        const firstPosition = positions[0];
-        const lineStyle = getLineStyle(symbol);
-        const isPotential = firstPosition.isPotential;
+      // Create datasets - need to separate real and potential stocks even if same symbol
+      const datasets: any[] = [];
 
-        return {
-          label: symbol,
-          data: firstPosition.historicalData.map((d) => ({
-            x: d.timestamp,
-            y: d.price,
-          })),
-          borderColor: isPotential ? lineStyle.color : lineStyle.color,
-          backgroundColor: lineStyle.color + "20",
-          borderWidth: lineStyle.thickness,
-          borderDash: isPotential ? [10, 5] : [], // Dashed line for potential stocks
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          fill: false,
-          tension: 0.1,
-          // Store all purchase dates for this symbol
-          purchaseDates: isPotential ? [] : positions.map(p => ({ date: p.purchaseDate, id: p.id })),
-          isPotential,
-        };
+      positionsBySymbol.forEach((positions, symbol) => {
+        const lineStyle = getLineStyle(symbol);
+
+        // Separate real and potential positions
+        const realPositions = positions.filter(p => !p.isPotential);
+        const potentialPositions = positions.filter(p => p.isPotential);
+
+        // Add dataset for real positions (if any)
+        if (realPositions.length > 0) {
+          const firstReal = realPositions[0];
+          datasets.push({
+            label: symbol,
+            data: firstReal.historicalData.map((d) => ({
+              x: d.timestamp,
+              y: d.price,
+            })),
+            borderColor: lineStyle.color,
+            backgroundColor: lineStyle.color + "20",
+            borderWidth: lineStyle.thickness,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            fill: false,
+            tension: 0.1,
+            purchaseDates: realPositions.map(p => ({ date: p.purchaseDate, id: p.id })),
+            isPotential: false,
+          });
+        }
+
+        // Add dataset for each potential position
+        potentialPositions.forEach((potentialPos) => {
+          datasets.push({
+            label: `${symbol} (Projected)`,
+            data: potentialPos.historicalData.map((d) => ({
+              x: d.timestamp,
+              y: d.price,
+            })),
+            borderColor: lineStyle.color,
+            backgroundColor: lineStyle.color + "20",
+            borderWidth: lineStyle.thickness,
+            borderDash: [10, 5], // Dashed line for potential stocks
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            fill: false,
+            tension: 0.1,
+            purchaseDates: [],
+            isPotential: true,
+            segment: {
+              borderDash: [10, 5],
+            },
+          });
+        });
       });
 
       return { datasets };

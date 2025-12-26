@@ -161,8 +161,6 @@ export default function PortfolioPage() {
   const [showComparison, setShowComparison] = useState(false);
   const saveTimeoutRef = useRef<number | null>(null);
 
-  if (authLoading) return null;
-
   const buildPortfolioPayload = (portfolio: Portfolio) => {
     return {
       id: portfolio.id,
@@ -647,6 +645,10 @@ export default function PortfolioPage() {
   };
 
   const activePortfolio = portfolios.find(p => p.id === activePortfolioId);
+
+  if (authLoading) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-950 to-black p-6">

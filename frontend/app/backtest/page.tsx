@@ -25,12 +25,14 @@ import {
 } from "chart.js";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { python } from "@codemirror/lang-python";
-import "@/utils/nativeDateAdapter";
+import "chartjs-adapter-date-fns";
 import ManualMode from "./ManualMode";
 import PortfolioMode from "./PortfolioMode";
 import { apiFetch } from "@/app/lib/api";
 import { useRequireAuth } from "@/app/hooks/useRequireAuth";
+import { UserDisplay } from "@/app/components/UserDisplay";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler, BarElement, BarController);
 
@@ -863,7 +865,7 @@ const PARAM_TOOLTIPS: Record<string, string> = {
 function BacktestPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { loading: authLoading } = useRequireAuth();
+  const { user, loading: authLoading } = useRequireAuth();
   const FORM_SETTING_KEY = "backtest-form";
   const PRESET_SETTING_KEY = "strategy-param-presets";
 
@@ -910,16 +912,6 @@ function BacktestPageContent() {
     }
   }, [authLoading, FORM_SETTING_KEY, PRESET_SETTING_KEY]);
 
-  if (authLoading) {
-    return null;
-  }
-
-  // Check if portfolio mode is requested
-  const portfolioMode = searchParams.get('mode') === 'portfolio';
-  if (portfolioMode) {
-    return <PortfolioMode />;
-  }
-
   const [strategyCode, setStrategyCode] = useState(DEFAULT_STRATEGY);
   const [symbol, setSymbol] = useState("AAPL");
   const [csvPath, setCsvPath] = useState("");
@@ -948,7 +940,7 @@ function BacktestPageContent() {
   const [serverRunsError, setServerRunsError] = useState<string | null>(null);
   const [serverRunLoadingId, setServerRunLoadingId] = useState<string | null>(null);
   const [serverRunError, setServerRunError] = useState<string | null>(null);
-  const [tradingMode, setTradingMode] = useState<"mechanical" | "manual">("mechanical");
+  const [tradingMode, setTradingMode] = useState<"mechanical" | "manual">("manual");
   const [mode, setMode] = useState<"custom" | "builtin">("builtin");
   const [builtinId, setBuiltinId] = useState<string | null>(null);
   const [builtinParams, setBuiltinParams] = useState<NumericParams>({});
@@ -1110,9 +1102,15 @@ function BacktestPageContent() {
         const value = data.value;
         if (value === "manual" || value === "mechanical") {
           setTradingMode(value);
+        } else {
+          // Default to manual (Fundamental) if no saved preference
+          setTradingMode("manual");
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // Default to manual (Fundamental) on error
+        setTradingMode("manual");
+      });
   }, []);
 
   useEffect(() => {
@@ -2443,6 +2441,14 @@ function BacktestPageContent() {
     [timeline.length, totalBars, valueToIndex, triggerChartAnimation],
   );
 
+  const portfolioMode = searchParams.get("mode") === "portfolio";
+  if (authLoading) {
+    return null;
+  }
+  if (portfolioMode) {
+    return <PortfolioMode />;
+  }
+
   return (
     <>
       <main className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-gray-100">
@@ -2451,33 +2457,43 @@ function BacktestPageContent() {
           <header className="mb-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5 backdrop-blur-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
+                <Link
+                  href="/dashboard"
+                  className="px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  ← Back
+                </Link>
+                <div className="h-6 w-px bg-gray-700"></div>
                 <img src="/logo.svg" alt="Prior Systems" className="h-7 w-auto" />
                 <div className="h-6 w-px bg-gray-700"></div>
                 <h1 className="text-lg font-bold tracking-tight text-gray-50">Backtest Console</h1>
               </div>
 
-              {/* Trading Mode Toggle - Inline with Header */}
-              <div className="inline-flex rounded-lg border border-gray-800 bg-gray-900/60 p-0.5">
-                <button
-                  onClick={() => setTradingMode("mechanical")}
-                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
-                    tradingMode === "mechanical"
-                      ? "bg-white text-black"
-                      : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  Mechanical
-                </button>
-                <button
-                  onClick={() => setTradingMode("manual")}
-                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
-                    tradingMode === "manual"
-                      ? "bg-white text-black"
-                      : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  Fundamental
-                </button>
+              <div className="flex items-center gap-4">
+                {/* Trading Mode Toggle - Inline with Header */}
+                <div className="inline-flex rounded-lg border border-gray-800 bg-gray-900/60 p-0.5">
+                  <button
+                    onClick={() => setTradingMode("mechanical")}
+                    className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
+                      tradingMode === "mechanical"
+                        ? "bg-white text-black"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    Mechanical
+                  </button>
+                  <button
+                    onClick={() => setTradingMode("manual")}
+                    className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
+                      tradingMode === "manual"
+                        ? "bg-white text-black"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    Fundamental
+                  </button>
+                </div>
+                {user && <UserDisplay email={user.email} />}
               </div>
             </div>
           </header>

@@ -1589,10 +1589,17 @@ async def get_stock_prices(
             # Current price (latest close)
             current_price = float(hist['Close'].iloc[-1])
 
-            # Previous close (second to last if available, otherwise same as current)
-            if len(hist) > 1:
-                previous_close = float(hist['Close'].iloc[-2])
-            else:
+            # Previous close - always fetch the last 2 trading days to get accurate daily change
+            # This ensures the daily change is consistent regardless of the chart's time range
+            try:
+                daily_hist = ticker.history(period="5d", interval="1d")
+                if len(daily_hist) >= 2:
+                    previous_close = float(daily_hist['Close'].iloc[-2])
+                else:
+                    # Fallback: if we don't have 2 days of data, use current price
+                    previous_close = current_price
+            except Exception:
+                # If fetching daily history fails, fallback to current price
                 previous_close = current_price
 
             # Build historical data array

@@ -30,7 +30,7 @@ import { python } from "@codemirror/lang-python";
 import "chartjs-adapter-date-fns";
 import ManualMode from "./ManualMode";
 import PortfolioMode from "./PortfolioMode";
-import { apiFetch } from "@/app/lib/api";
+import { apiFetch, API_BASE } from "@/app/lib/api";
 import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 import { UserDisplay } from "@/app/components/UserDisplay";
 
@@ -2504,6 +2504,7 @@ function BacktestPageContent() {
               datasetPath={csvPath}
               datasetName={lockedDataset.name}
               symbol={symbol}
+              apiBase={API_BASE}
               startBar={startBar}
               maxBars={maxBars}
               initialCashOverride={usingPortfolio ? portfolioEquity ?? undefined : initialCash}

@@ -501,6 +501,7 @@ export default function LivePricesPage() {
       const stockData = data[symbol];
 
       if (!stockData) throw new Error("Stock not found");
+      if (stockData.error) throw new Error(stockData.error);
 
       const symbolKey = symbol.toUpperCase();
       const existingLineStyle = lineStyles[symbolKey];

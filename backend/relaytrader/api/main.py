@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Any, Type, List
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, model_validator
 from sqlalchemy.orm import Session
@@ -1297,11 +1297,11 @@ def get_run(
 
 @app.post("/download-symbol")
 def download_symbol(
-    symbol: str,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    period: str = "max",
-    refresh: bool = False,
+    symbol: str = Query(...),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    period: str = Query("max"),
+    refresh: bool = Query(False),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
@@ -1562,11 +1562,19 @@ async def get_stock_prices(
             hist = ticker.history(period=period, interval=interval)
 
             if hist.empty:
-                raise ValueError(f"No data found for {symbol}")
+                print(f"No historical data for {symbol} with period={period}")
+                result[symbol] = {
+                    "error": f"No historical data available for {symbol}. Try a different time range or check if the symbol is valid."
+                }
+                continue
 
             # Get company info
-            info = ticker.info
-            company_name = info.get("longName", symbol)
+            try:
+                info = ticker.info
+                company_name = info.get("longName", symbol)
+            except Exception:
+                # If ticker.info fails, just use the symbol
+                company_name = symbol
 
             # Current price (latest close)
             current_price = float(hist['Close'].iloc[-1])
@@ -1595,7 +1603,10 @@ async def get_stock_prices(
 
         except Exception as e:
             # If we fail to fetch a stock, log but continue with others
-            print(f"Error fetching {symbol}: {e}")
-            result[symbol] = None
+            error_msg = str(e)
+            print(f"Error fetching {symbol}: {error_msg}")
+            result[symbol] = {
+                "error": f"Failed to fetch data for {symbol}: {error_msg}"
+            }
 
     return result

@@ -48,17 +48,24 @@ cors_origins = os.getenv("CORS_ORIGINS")
 if cors_origins:
     allow_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
 else:
-    # Allow all Vercel domains and localhost for now
-    allow_origins = ["*"]
+    # Allow specific Vercel domains - using regex pattern for flexibility
+    allow_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://prior-systems.vercel.app",
+        "https://priorsystems.vercel.app",
+        "https://*.vercel.app",  # Allow all Vercel preview deployments
+    ]
 
 print(f"⚙️  CORS Configuration: {allow_origins}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins if allow_origins != ["*"] else ["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Regex for Vercel domains
 )
 
 

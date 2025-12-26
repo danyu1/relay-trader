@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { Line } from "react-chartjs-2";
 import {
@@ -41,6 +41,11 @@ interface StockPosition {
   fontSize: number;
   lastUpdate: number;
   historicalData: { timestamp: number; price: number }[];
+  isPotential?: boolean; // True if this is a potential stock projection
+  growthRate?: number; // Growth rate per period (e.g., 5% per month)
+  growthPeriod?: 'day' | 'week' | 'month' | 'year'; // Period for growth rate
+  holdingPeriod?: number; // How long they plan to hold (in days)
+  purchaseDates?: number[]; // For clumped stocks, array of all purchase dates
 }
 
 interface LineStyle {
@@ -110,7 +115,9 @@ export default function LivePricesPage() {
   const [showCustomization, setShowCustomization] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [showPotentialStockDialog, setShowPotentialStockDialog] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [clumpByStock, setClumpByStock] = useState(false);
   const [chartConfig, setChartConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [lineStyles, setLineStyles] = useState<Record<string, LineStyle>>({});
   const [currentPortfolioId, setCurrentPortfolioId] = useState<number | null>(null);
@@ -155,7 +162,15 @@ export default function LivePricesPage() {
       lineThickness: position.lineThickness,
       fontSize: position.fontSize,
       lastUpdate: position.lastUpdate,
-      meta: { name: position.name },
+      meta: {
+        name: position.name,
+        historicalData: position.historicalData,
+        isPotential: position.isPotential,
+        growthRate: position.growthRate,
+        growthPeriod: position.growthPeriod,
+        holdingPeriod: position.holdingPeriod,
+        purchaseDates: position.purchaseDates,
+      },
     }));
   }, []);
 
@@ -228,9 +243,55 @@ export default function LivePricesPage() {
     migrate();
   }, [authLoading, buildHoldingsPayload]);
 
+  // Clump positions by stock if enabled
+  const displayPositions = React.useMemo(() => {
+    if (!clumpByStock) {
+      return portfolio.positions;
+    }
+
+    // Group positions by symbol
+    const grouped = new Map<string, StockPosition[]>();
+    portfolio.positions.forEach((position) => {
+      if (!grouped.has(position.symbol)) {
+        grouped.set(position.symbol, []);
+      }
+      grouped.get(position.symbol)!.push(position);
+    });
+
+    // Create clumped positions
+    const clumped: StockPosition[] = [];
+    grouped.forEach((positions, symbol) => {
+      if (positions.length === 1 && !positions[0].isPotential) {
+        // Only one position, no need to clump
+        clumped.push(positions[0]);
+      } else if (positions.every(p => !p.isPotential)) {
+        // Multiple real positions, clump them
+        const totalShares = positions.reduce((sum, p) => sum + p.shares, 0);
+        const totalCost = positions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+        const weightedAvgPrice = totalCost / totalShares;
+        const firstPosition = positions[0];
+        const allPurchaseDates = positions.map(p => p.purchaseDate).sort((a, b) => a - b);
+
+        clumped.push({
+          ...firstPosition,
+          id: `clumped-${symbol}`,
+          shares: totalShares,
+          costBasis: weightedAvgPrice,
+          purchaseDates: allPurchaseDates,
+          purchaseDate: allPurchaseDates[0], // Earliest purchase date
+        });
+      } else {
+        // Keep potential stocks separate
+        clumped.push(...positions);
+      }
+    });
+
+    return clumped;
+  }, [portfolio.positions, clumpByStock]);
+
   const ITEMS_PER_PAGE = 8; // 2 rows x 4 columns
-  const totalPages = Math.ceil(portfolio.positions.length / ITEMS_PER_PAGE);
-  const paginatedPositions = portfolio.positions.slice(
+  const totalPages = Math.ceil(displayPositions.length / ITEMS_PER_PAGE);
+  const paginatedPositions = displayPositions.slice(
     currentPage * ITEMS_PER_PAGE,
     (currentPage + 1) * ITEMS_PER_PAGE
   );
@@ -286,6 +347,11 @@ export default function LivePricesPage() {
               fontSize: holding.fontSize ?? 100,
               lastUpdate: holding.lastUpdate ?? Date.now(),
               historicalData: holding.meta?.historicalData || [],
+              isPotential: holding.meta?.isPotential,
+              growthRate: holding.meta?.growthRate,
+              growthPeriod: holding.meta?.growthPeriod,
+              holdingPeriod: holding.meta?.holdingPeriod,
+              purchaseDates: holding.meta?.purchaseDates,
             };
           });
           const totalValue = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
@@ -378,21 +444,26 @@ export default function LivePricesPage() {
     };
   }, [authLoading, portfolio.positions, chartConfig, lineStyles, currentPortfolioId, buildHoldingsPayload]);
 
+  // Memoize line styles array to prevent unnecessary re-renders
+  const lineStylesArray = useMemo(() => {
+    return Object.entries(lineStyles).map(([symbol, style]) => ({
+      symbol,
+      color: style.color,
+      thickness: style.thickness,
+    }));
+  }, [lineStyles]);
+
   useEffect(() => {
     if (authLoading) return;
+    if (lineStylesArray.length === 0) return;
+
     if (lineStyleTimeoutRef.current) {
       window.clearTimeout(lineStyleTimeoutRef.current);
     }
     lineStyleTimeoutRef.current = window.setTimeout(() => {
-      const styles = Object.entries(lineStyles).map(([symbol, style]) => ({
-        symbol,
-        color: style.color,
-        thickness: style.thickness,
-      }));
-      if (styles.length === 0) return;
       apiFetch("/line-styles", {
         method: "POST",
-        body: JSON.stringify({ styles }),
+        body: JSON.stringify({ styles: lineStylesArray }),
       }).catch((error) => {
         console.error("Failed to persist line styles:", error);
       });
@@ -402,7 +473,7 @@ export default function LivePricesPage() {
         window.clearTimeout(lineStyleTimeoutRef.current);
       }
     };
-  }, [authLoading, lineStyles]);
+  }, [authLoading, lineStylesArray.length]); // Only depend on the count, not the full array
 
   // Refresh stock prices
   const refreshPrices = useCallback(async () => {
@@ -410,8 +481,15 @@ export default function LivePricesPage() {
 
     setIsRefreshing(true);
     try {
-      // Fetch latest prices for all positions
-      const symbols = portfolio.positions.map((p) => p.symbol);
+      // Fetch latest prices for all non-potential positions
+      const realPositions = portfolio.positions.filter(p => !p.isPotential);
+      const symbols = realPositions.map((p) => p.symbol);
+
+      if (symbols.length === 0) {
+        setIsRefreshing(false);
+        return;
+      }
+
       const response = await apiFetch("/api/stock-prices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -422,8 +500,10 @@ export default function LivePricesPage() {
 
       const data = await response.json();
 
-      // Update positions with new prices
+      // Update positions with new prices (skip potential stocks)
       const updatedPositions = portfolio.positions.map((position) => {
+        if (position.isPotential) return position; // Don't refresh potential stocks
+
         const stockData = data[position.symbol];
         if (!stockData) return position;
 
@@ -469,21 +549,29 @@ export default function LivePricesPage() {
     }
   }, [portfolio.positions, timeRange]);
 
+  // Store refreshPrices in a ref to avoid dependency issues
+  const refreshPricesRef = useRef(refreshPrices);
+  useEffect(() => {
+    refreshPricesRef.current = refreshPrices;
+  }, [refreshPrices]);
+
   // Auto-refresh every 5 minutes
   useEffect(() => {
+    if (portfolio.positions.length === 0) return;
+
     const interval = setInterval(() => {
-      refreshPrices();
+      refreshPricesRef.current();
     }, 5 * 60 * 1000); // 5 minutes
 
     return () => clearInterval(interval);
-  }, [refreshPrices]);
+  }, [portfolio.positions.length]);
 
   // Auto-refresh when time range changes
   useEffect(() => {
     if (portfolio.positions.length > 0) {
-      refreshPrices();
+      refreshPricesRef.current();
     }
-  }, [timeRange, portfolio.positions.length, refreshPrices]);
+  }, [timeRange, portfolio.positions.length]);
 
   // Add new stock position
   const addPosition = useCallback(async (symbol: string, shares: number, purchaseDate: number, purchasePrice: number) => {
@@ -734,6 +822,11 @@ export default function LivePricesPage() {
           fontSize: holding.fontSize ?? 100,
           lastUpdate: holding.lastUpdate ?? Date.now(),
           historicalData: holding.meta?.historicalData || [],
+          isPotential: holding.meta?.isPotential,
+          growthRate: holding.meta?.growthRate,
+          growthPeriod: holding.meta?.growthPeriod,
+          holdingPeriod: holding.meta?.holdingPeriod,
+          purchaseDates: holding.meta?.purchaseDates,
         };
       });
 
@@ -918,15 +1011,40 @@ export default function LivePricesPage() {
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold">Your Holdings</h2>
-            <button
-              onClick={() => setShowAddDialog(true)}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition font-semibold flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Stock
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setClumpByStock(!clumpByStock)}
+                className={`px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2 ${
+                  clumpByStock
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-gray-700 hover:bg-gray-600"
+                }`}
+                title="Toggle clump by stock"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                {clumpByStock ? "Clumped" : "Clump by Stock"}
+              </button>
+              <button
+                onClick={() => setShowPotentialStockDialog(true)}
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 transition font-semibold flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+                Potential Stock
+              </button>
+              <button
+                onClick={() => setShowAddDialog(true)}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition font-semibold flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Stock
+              </button>
+            </div>
           </div>
 
           {portfolio.positions.length === 0 ? (
@@ -1094,6 +1212,104 @@ export default function LivePricesPage() {
           onUpdateReferenceDate={updatePositionReferenceDate}
         />
       )}
+
+      {/* Potential Stock Dialog */}
+      {showPotentialStockDialog && (
+        <PotentialStockDialog
+          onClose={() => setShowPotentialStockDialog(false)}
+          onAdd={(symbol, currentPrice, growthRate, growthPeriod, holdingPeriod) => {
+            // Create potential stock position
+            const now = Date.now();
+            const symbolKey = symbol.toUpperCase();
+            const existingLineStyle = lineStyles[symbolKey];
+            const fallbackColor = PRESET_COLORS[Object.keys(lineStyles).length % PRESET_COLORS.length];
+            const assignedColor = existingLineStyle?.color || fallbackColor;
+            const assignedThickness = existingLineStyle?.thickness || chartConfig.lineThickness;
+
+            // Calculate future price based on growth rate and period
+            const calculateFuturePrice = (days: number) => {
+              let periodsElapsed = 0;
+              switch (growthPeriod) {
+                case 'day':
+                  periodsElapsed = days;
+                  break;
+                case 'week':
+                  periodsElapsed = days / 7;
+                  break;
+                case 'month':
+                  periodsElapsed = days / 30;
+                  break;
+                case 'year':
+                  periodsElapsed = days / 365;
+                  break;
+              }
+              return currentPrice * Math.pow(1 + growthRate / 100, periodsElapsed);
+            };
+
+            // Generate historical data for the projection
+            const historicalData = [];
+            const daysToProject = holdingPeriod;
+            const pointsToGenerate = Math.min(100, daysToProject);
+            const dayIncrement = daysToProject / pointsToGenerate;
+
+            for (let i = 0; i <= pointsToGenerate; i++) {
+              const days = i * dayIncrement;
+              const timestamp = now + days * 24 * 60 * 60 * 1000;
+              const price = calculateFuturePrice(days);
+              historicalData.push({ timestamp, price });
+            }
+
+            const newPosition: StockPosition = {
+              id: `potential-${symbolKey}-${Date.now()}`,
+              symbol: symbolKey,
+              name: symbolKey,
+              shares: 0,
+              costBasis: currentPrice,
+              purchaseDate: now,
+              referenceDate: now,
+              currentPrice,
+              change: 0,
+              changePercent: 0,
+              color: assignedColor,
+              cardColor: `${assignedColor}20`,
+              lineThickness: assignedThickness,
+              fontSize: 100,
+              lastUpdate: now,
+              historicalData,
+              isPotential: true,
+              growthRate,
+              growthPeriod,
+              holdingPeriod,
+            };
+
+            setLineStyles((prev) => {
+              if (prev[symbolKey]) return prev;
+              return {
+                ...prev,
+                [symbolKey]: {
+                  color: assignedColor,
+                  thickness: assignedThickness,
+                },
+              };
+            });
+
+            const updatedPositions = [...portfolio.positions, newPosition];
+            const totalValue = updatedPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
+            const totalCost = updatedPositions.reduce((sum, p) => sum + p.shares * p.costBasis, 0);
+            const totalGainLoss = totalValue - totalCost;
+
+            setPortfolio({
+              positions: updatedPositions,
+              totalValue,
+              totalCost,
+              totalGainLoss,
+              totalGainLossPercent: totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0,
+            });
+
+            setShowPotentialStockDialog(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1138,10 +1354,17 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
       className="rounded-xl border p-4 relative transition-all"
       style={{
         borderColor: lineColor + "40",
-        backgroundColor: position.cardColor,
+        backgroundColor: position.isPotential ? "#8b5cf640" : position.cardColor,
         fontSize: `${fontSizeScale}rem`
       }}
     >
+      {/* Potential Stock Badge */}
+      {position.isPotential && (
+        <div className="absolute top-2 right-2 px-2 py-1 rounded-md bg-purple-600 text-white text-xs font-bold">
+          Potential Stock
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -1156,14 +1379,26 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
           </div>
         </div>
 
-        <button
-          onClick={() => onRemove(position.id)}
-          className="text-gray-500 hover:text-red-400 transition"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {!position.isPotential && (
+          <button
+            onClick={() => onRemove(position.id)}
+            className="text-gray-500 hover:text-red-400 transition"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        {position.isPotential && (
+          <button
+            onClick={() => onRemove(position.id)}
+            className="text-gray-500 hover:text-red-400 transition mt-8"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Color Picker */}
@@ -1197,6 +1432,12 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
         <div className={`text-sm ${changePercentFromReference >= 0 ? "text-green-400" : "text-red-400"}`}>
           {changePercentFromReference >= 0 ? "+" : ""}{changeFromReference.toFixed(2)} ({changePercentFromReference.toFixed(2)}%) since {new Date(position.referenceDate).toLocaleDateString()}
         </div>
+        {/* Show all purchase dates if clumped */}
+        {position.purchaseDates && position.purchaseDates.length > 1 && (
+          <div className="text-xs text-gray-400 mt-1">
+            Purchased: {position.purchaseDates.map(d => new Date(d).toLocaleDateString()).join(', ')}
+          </div>
+        )}
       </div>
 
       {/* Sparkline Chart */}
@@ -1311,21 +1552,25 @@ function PortfolioChart({ portfolio, chartView, timeRange, config, lineStyles }:
       const datasets = Array.from(positionsBySymbol.entries()).map(([symbol, positions]) => {
         const firstPosition = positions[0];
         const lineStyle = getLineStyle(symbol);
+        const isPotential = firstPosition.isPotential;
+
         return {
           label: symbol,
           data: firstPosition.historicalData.map((d) => ({
             x: d.timestamp,
             y: d.price,
           })),
-          borderColor: lineStyle.color,
+          borderColor: isPotential ? lineStyle.color : lineStyle.color,
           backgroundColor: lineStyle.color + "20",
           borderWidth: lineStyle.thickness,
+          borderDash: isPotential ? [10, 5] : [], // Dashed line for potential stocks
           pointRadius: 0,
           pointHoverRadius: 4,
           fill: false,
           tension: 0.1,
           // Store all purchase dates for this symbol
-          purchaseDates: positions.map(p => ({ date: p.purchaseDate, id: p.id })),
+          purchaseDates: isPotential ? [] : positions.map(p => ({ date: p.purchaseDate, id: p.id })),
+          isPotential,
         };
       });
 
@@ -2191,6 +2436,256 @@ function LoadPortfolioDialog({ onClose, onLoad, onDelete, getSavedPortfolios }: 
             Close
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== POTENTIAL STOCK DIALOG ====================
+
+interface PotentialStockDialogProps {
+  onClose: () => void;
+  onAdd: (symbol: string, currentPrice: number, growthRate: number, growthPeriod: 'day' | 'week' | 'month' | 'year', holdingPeriod: number) => void;
+}
+
+function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
+  const [symbol, setSymbol] = useState("");
+  const [currentPrice, setCurrentPrice] = useState("");
+  const [growthRate, setGrowthRate] = useState("");
+  const [growthPeriod, setGrowthPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [holdingPeriod, setHoldingPeriod] = useState("");
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
+
+  // Fetch current price when symbol changes
+  useEffect(() => {
+    const trimmedSymbol = symbol.trim().toUpperCase();
+    if (!trimmedSymbol) {
+      setCurrentPrice("");
+      setPriceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsFetchingPrice(true);
+    setPriceError(null);
+
+    const loadPrice = async () => {
+      try {
+        const response = await apiFetch("/api/stock-prices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: [trimmedSymbol], range: "1D" }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch price data");
+        }
+
+        const data = await response.json();
+        const stockData = data[trimmedSymbol];
+        if (!stockData || stockData.error) {
+          throw new Error(stockData?.error || "Stock not found");
+        }
+
+        if (!cancelled) {
+          setCurrentPrice(stockData.current_price.toFixed(2));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCurrentPrice("");
+          setPriceError(error instanceof Error ? error.message : "Failed to fetch price");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsFetchingPrice(false);
+        }
+      }
+    };
+
+    const debounce = setTimeout(loadPrice, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
+  }, [symbol]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const priceValue = parseFloat(currentPrice);
+    const rateValue = parseFloat(growthRate);
+    const periodValue = parseFloat(holdingPeriod);
+
+    if (!symbol || !Number.isFinite(priceValue) || priceValue <= 0 ||
+        !Number.isFinite(rateValue) || !Number.isFinite(periodValue) || periodValue <= 0) {
+      return;
+    }
+
+    onAdd(symbol.toUpperCase(), priceValue, rateValue, growthPeriod, periodValue);
+  };
+
+  const priceValue = parseFloat(currentPrice);
+  const rateValue = parseFloat(growthRate);
+  const periodValue = parseFloat(holdingPeriod);
+  const hasValidInputs = Number.isFinite(priceValue) && priceValue > 0 &&
+                         Number.isFinite(rateValue) &&
+                         Number.isFinite(periodValue) && periodValue > 0;
+
+  // Calculate projected value
+  let projectedPrice = 0;
+  if (hasValidInputs) {
+    let periodsElapsed = 0;
+    switch (growthPeriod) {
+      case 'day':
+        periodsElapsed = periodValue;
+        break;
+      case 'week':
+        periodsElapsed = periodValue / 7;
+        break;
+      case 'month':
+        periodsElapsed = periodValue / 30;
+        break;
+      case 'year':
+        periodsElapsed = periodValue / 365;
+        break;
+    }
+    projectedPrice = priceValue * Math.pow(1 + rateValue / 100, periodsElapsed);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-bold">Add Potential Stock</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Stock Symbol
+            </label>
+            <input
+              type="text"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              placeholder="AAPL"
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              required
+            />
+            {isFetchingPrice && <p className="text-xs text-gray-500 mt-1">Fetching current price...</p>}
+            {priceError && <p className="text-xs text-red-400 mt-1">{priceError}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Current Price Per Share
+            </label>
+            <input
+              type="number"
+              value={currentPrice}
+              onChange={(e) => setCurrentPrice(e.target.value)}
+              placeholder="150.00"
+              step="0.01"
+              min="0"
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Expected Growth Rate (%)
+            </label>
+            <input
+              type="number"
+              value={growthRate}
+              onChange={(e) => setGrowthRate(e.target.value)}
+              placeholder="5.0"
+              step="0.1"
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Enter positive for growth, negative for decline
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Growth Period
+            </label>
+            <select
+              value={growthPeriod}
+              onChange={(e) => setGrowthPeriod(e.target.value as 'day' | 'week' | 'month' | 'year')}
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white focus:outline-none focus:border-purple-500"
+            >
+              <option value="day">Per Day</option>
+              <option value="week">Per Week</option>
+              <option value="month">Per Month</option>
+              <option value="year">Per Year</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Holding Period (days)
+            </label>
+            <input
+              type="number"
+              value={holdingPeriod}
+              onChange={(e) => setHoldingPeriod(e.target.value)}
+              placeholder="365"
+              step="1"
+              min="1"
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              How many days you plan to hold this stock
+            </p>
+          </div>
+
+          {hasValidInputs && (
+            <div className="rounded-lg border border-purple-800 bg-purple-950/40 p-4">
+              <div className="text-sm text-gray-300 mb-2">Projected Value</div>
+              <div className="text-2xl font-bold text-purple-400">
+                ${projectedPrice.toFixed(2)}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                After {periodValue} days at {rateValue}% per {growthPeriod}
+              </div>
+              <div className={`text-sm mt-2 ${projectedPrice >= priceValue ? "text-green-400" : "text-red-400"}`}>
+                {projectedPrice >= priceValue ? "+" : ""}
+                {((projectedPrice - priceValue) / priceValue * 100).toFixed(2)}% total change
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!hasValidInputs}
+              className="flex-1 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Add Potential Stock
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

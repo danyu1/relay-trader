@@ -992,6 +992,16 @@ export default function LivePricesPage() {
             <div className="text-2xl font-bold">
               ${portfolio.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
+            {(() => {
+              const realPositions = portfolio.positions.filter(p => !p.isPotential);
+              const totalDailyChange = realPositions.reduce((sum, p) => sum + (p.shares * p.change), 0);
+              const totalDailyChangePercent = portfolio.totalValue > 0 ? (totalDailyChange / portfolio.totalValue) * 100 : 0;
+              return (
+                <div className={`text-xs font-semibold mt-1 ${totalDailyChangePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  Today: {totalDailyChangePercent >= 0 ? "+" : ""}${totalDailyChange.toFixed(2)} ({totalDailyChangePercent >= 0 ? "+" : ""}{totalDailyChangePercent.toFixed(2)}%)
+                </div>
+              );
+            })()}
           </div>
 
           <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
@@ -1024,7 +1034,7 @@ export default function LivePricesPage() {
           const projectedGainsFromPotential = potentialStocks.reduce((sum, p) => {
             if (p.historicalData.length > 0) {
               const finalPrice = p.historicalData[p.historicalData.length - 1].price;
-              const gain = finalPrice - p.currentPrice;
+              const gain = (finalPrice - p.currentPrice) * p.shares;
               return sum + gain;
             }
             return sum;
@@ -1301,7 +1311,7 @@ export default function LivePricesPage() {
       {showPotentialStockDialog && (
         <PotentialStockDialog
           onClose={() => setShowPotentialStockDialog(false)}
-          onAdd={(symbol, currentPrice, growthRate, growthPeriod, holdingPeriod) => {
+          onAdd={(symbol, currentPrice, shares, growthRate, growthPeriod, holdingPeriod) => {
             // Create potential stock position
             const now = Date.now();
             const symbolKey = symbol.toUpperCase();
@@ -1347,7 +1357,7 @@ export default function LivePricesPage() {
               id: `potential-${symbolKey}-${Date.now()}`,
               symbol: symbolKey,
               name: symbolKey,
-              shares: 0,
+              shares: shares,
               costBasis: currentPrice,
               purchaseDate: now,
               referenceDate: now,
@@ -1428,6 +1438,10 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
     : position.currentPrice;
   const changeFromReference = finalPrice - priceAtReference;
   const changePercentFromReference = priceAtReference > 0 ? (changeFromReference / priceAtReference) * 100 : 0;
+
+  // Calculate daily gain/loss (change and changePercent are already daily from API)
+  const dailyChange = position.change;
+  const dailyChangePercent = position.changePercent;
 
   const fontSizeScale = position.fontSize / 100;
 
@@ -1522,6 +1536,14 @@ function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCa
             <span className="text-base ml-2">→ ${finalPrice.toFixed(2)}</span>
           )}
         </div>
+
+        {/* Daily Gain/Loss */}
+        {!position.isPotential && (
+          <div className={`text-xs font-semibold ${dailyChangePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+            Today: {dailyChangePercent >= 0 ? "+" : ""}${dailyChange.toFixed(2)} ({dailyChangePercent >= 0 ? "+" : ""}{dailyChangePercent.toFixed(2)}%)
+          </div>
+        )}
+
         <div className={`text-sm ${changePercentFromReference >= 0 ? "text-green-400" : "text-red-400"}`}>
           {position.isPotential ? (
             <>
@@ -2613,12 +2635,13 @@ function LoadPortfolioDialog({ onClose, onLoad, onDelete, getSavedPortfolios }: 
 
 interface PotentialStockDialogProps {
   onClose: () => void;
-  onAdd: (symbol: string, currentPrice: number, growthRate: number, growthPeriod: 'day' | 'week' | 'month' | 'year', holdingPeriod: number) => void;
+  onAdd: (symbol: string, currentPrice: number, shares: number, growthRate: number, growthPeriod: 'day' | 'week' | 'month' | 'year', holdingPeriod: number) => void;
 }
 
 function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
   const [symbol, setSymbol] = useState("");
   const [currentPrice, setCurrentPrice] = useState("");
+  const [shares, setShares] = useState("");
   const [growthRate, setGrowthRate] = useState("");
   const [growthPeriod, setGrowthPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
   const [holdingPeriod, setHoldingPeriod] = useState("");
@@ -2681,21 +2704,25 @@ function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const priceValue = parseFloat(currentPrice);
+    const sharesValue = parseFloat(shares);
     const rateValue = parseFloat(growthRate);
     const periodValue = parseFloat(holdingPeriod);
 
     if (!symbol || !Number.isFinite(priceValue) || priceValue <= 0 ||
+        !Number.isFinite(sharesValue) || sharesValue <= 0 ||
         !Number.isFinite(rateValue) || !Number.isFinite(periodValue) || periodValue <= 0) {
       return;
     }
 
-    onAdd(symbol.toUpperCase(), priceValue, rateValue, growthPeriod, periodValue);
+    onAdd(symbol.toUpperCase(), priceValue, sharesValue, rateValue, growthPeriod, periodValue);
   };
 
   const priceValue = parseFloat(currentPrice);
+  const sharesValue = parseFloat(shares);
   const rateValue = parseFloat(growthRate);
   const periodValue = parseFloat(holdingPeriod);
   const hasValidInputs = Number.isFinite(priceValue) && priceValue > 0 &&
+                         Number.isFinite(sharesValue) && sharesValue > 0 &&
                          Number.isFinite(rateValue) &&
                          Number.isFinite(periodValue) && periodValue > 0;
 
@@ -2770,6 +2797,25 @@ function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
+              Number of Shares
+            </label>
+            <input
+              type="number"
+              value={shares}
+              onChange={(e) => setShares(e.target.value)}
+              placeholder="10"
+              step="1"
+              min="0"
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              How many shares you plan to buy
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
               Expected Growth Rate (%)
             </label>
             <input
@@ -2823,16 +2869,19 @@ function PotentialStockDialog({ onClose, onAdd }: PotentialStockDialogProps) {
 
           {hasValidInputs && (
             <div className="rounded-lg border border-purple-800 bg-purple-950/40 p-4">
-              <div className="text-sm text-gray-300 mb-2">Projected Value</div>
+              <div className="text-sm text-gray-300 mb-2">Projected Position Value</div>
               <div className="text-2xl font-bold text-purple-400">
-                ${projectedPrice.toFixed(2)}
+                ${(sharesValue * projectedPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-xs text-gray-400 mt-1">
+                {sharesValue} shares @ ${projectedPrice.toFixed(2)} per share
+              </div>
+              <div className="text-xs text-gray-400">
                 After {periodValue} days at {rateValue}% per {growthPeriod}
               </div>
               <div className={`text-sm mt-2 ${projectedPrice >= priceValue ? "text-green-400" : "text-red-400"}`}>
                 {projectedPrice >= priceValue ? "+" : ""}
-                {((projectedPrice - priceValue) / priceValue * 100).toFixed(2)}% total change
+                ${((projectedPrice - priceValue) * sharesValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} gain ({((projectedPrice - priceValue) / priceValue * 100).toFixed(2)}%)
               </div>
             </div>
           )}

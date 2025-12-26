@@ -48,7 +48,12 @@ cors_origins = os.getenv("CORS_ORIGINS")
 if cors_origins:
     allow_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
 else:
-    allow_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    allow_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://prior-systems.vercel.app",
+        "https://priorsystems.vercel.app",
+    ]
 
 app.add_middleware(
     CORSMiddleware,

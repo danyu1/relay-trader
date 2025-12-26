@@ -995,7 +995,8 @@ export default function LivePricesPage() {
             {(() => {
               const realPositions = portfolio.positions.filter(p => !p.isPotential);
               const totalDailyChange = realPositions.reduce((sum, p) => sum + (p.shares * p.change), 0);
-              const totalDailyChangePercent = portfolio.totalValue > 0 ? (totalDailyChange / portfolio.totalValue) * 100 : 0;
+              const yesterdayTotalValue = portfolio.totalValue - totalDailyChange;
+              const totalDailyChangePercent = yesterdayTotalValue > 0 ? (totalDailyChange / yesterdayTotalValue) * 100 : 0;
               return (
                 <div className={`text-xs font-semibold mt-1 ${totalDailyChangePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
                   Today: {totalDailyChangePercent >= 0 ? "+" : ""}${totalDailyChange.toFixed(2)} ({totalDailyChangePercent >= 0 ? "+" : ""}{totalDailyChangePercent.toFixed(2)}%)

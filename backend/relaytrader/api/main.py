@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import sys
 import textwrap
 import tempfile
@@ -13,9 +14,10 @@ from pathlib import Path
 from typing import Dict, Any, Type, List
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, EmailStr, model_validator
+from sqlalchemy.orm import Session
 
 from ..core.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from ..core.strategy import Strategy
@@ -24,12 +26,33 @@ from ..core.annotations import TradeAnnotation, StockTradeAnnotation, Annotation
 from ..core.manual_simulator import ManualSimulator
 from ..strategies import list_strategies, get_strategy_class
 from ..data import DataDownloader
+from ..db import models
+from ..db.database import Base, engine, DATABASE_URL
+from .deps import get_db, get_current_user
+from .security import hash_password, verify_password, create_access_token, SESSION_COOKIE_NAME
 
 app = FastAPI(title="RelayTrader API", version="0.1.0")
 
+# Initialize database tables on startup
+@app.on_event("startup")
+async def startup_event():
+    try:
+        print(f"Initializing database at: {DATABASE_URL}")
+        Base.metadata.create_all(bind=engine)
+        print("Database tables created successfully")
+    except Exception as e:
+        print(f"Error creating database tables: {e}")
+        raise
+
+cors_origins = os.getenv("CORS_ORIGINS")
+if cors_origins:
+    allow_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+else:
+    allow_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,6 +137,107 @@ class DatasetListResponse(BaseModel):
     datasets: list[DatasetInfo]
 
 
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: EmailStr
+
+
+class DatasetProfilePayload(BaseModel):
+    id: int | None = None
+    datasetName: str
+    displayName: str
+    startIndex: int
+    endIndex: int
+    startTimestamp: int | None = None
+    endTimestamp: int | None = None
+    startDate: str | None = None
+    endDate: str | None = None
+    initialEquity: float
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class DatasetProfileListResponse(BaseModel):
+    profiles: list[DatasetProfilePayload]
+
+
+class ManualConfigPayload(BaseModel):
+    id: int | None = None
+    name: str
+    datasetName: str | None = None
+    trades: list[dict[str, Any]]
+    initialCash: float
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class ManualConfigListResponse(BaseModel):
+    configs: list[ManualConfigPayload]
+
+
+class PortfolioHoldingPayload(BaseModel):
+    id: int | None = None
+    symbol: str
+    shares: float
+    avgCost: float
+    costBasis: float | None = None
+    purchaseDate: int | None = None
+    referenceDate: int | None = None
+    currentPrice: float | None = None
+    currentValue: float | None = None
+    color: str | None = None
+    cardColor: str | None = None
+    lineThickness: float | None = None
+    fontSize: float | None = None
+    lastUpdate: int | None = None
+    meta: dict[str, Any] | None = None
+
+
+class PortfolioPayload(BaseModel):
+    id: int | None = None
+    name: str
+    cash: float
+    context: str = "builder"
+    chartConfig: dict[str, Any] | None = None
+    lineStyles: dict[str, Any] | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
+    targetAllocations: dict[str, Any] | None = None
+    performanceHistory: list[dict[str, Any]] | None = None
+    holdings: list[PortfolioHoldingPayload] = []
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class PortfolioListResponse(BaseModel):
+    portfolios: list[PortfolioPayload]
+
+
+class LineStylePayload(BaseModel):
+    symbol: str
+    color: str
+    thickness: float
+
+
+class LineStyleListResponse(BaseModel):
+    styles: list[LineStylePayload]
+
+
+class UserSettingPayload(BaseModel):
+    key: str
+    value: Any | None = None
+
+
 def _ts_to_label(ts: int | None) -> str | None:
     if ts is None:
         return None
@@ -125,31 +249,100 @@ def _symbol_from_filename(filename: str) -> str:
     return base.split("_")[0].upper() if base else filename.upper()
 
 
-DATA_DIR = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-RUNS_FILE = DATA_DIR / "runs.json"
-ANNOTATIONS_DIR = DATA_DIR / "annotations"
-ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
-
-# Initialize data downloader
-downloader = DataDownloader(DATA_DIR)
+BASE_DATA_DIR = (Path(__file__).resolve().parent.parent.parent / "data").resolve()
+BASE_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_run_records() -> List[Dict[str, Any]]:
-    if not RUNS_FILE.exists():
-        return []
-    try:
-        return json.loads(RUNS_FILE.read_text())
-    except json.JSONDecodeError:
-        return []
+def get_user_data_dir(user_id: int) -> Path:
+    user_dir = BASE_DATA_DIR / "users" / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
 
 
-def persist_run_record(record: Dict[str, Any]) -> None:
-    runs = load_run_records()
-    runs = [r for r in runs if r.get("run_id") != record.get("run_id")]
-    runs.insert(0, record)
-    runs = runs[:50]
-    RUNS_FILE.write_text(json.dumps(runs))
+def set_session_cookie(response: Response, token: str) -> None:
+    # For cross-origin cookies (Vercel -> Railway), we need SameSite=None and Secure=True
+    is_production = os.getenv("RAILWAY_ENVIRONMENT") == "production"
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="none" if is_production else "lax",
+        secure=True if is_production else False,
+        max_age=60 * 60 * 24 * 7,
+        path="/",
+    )
+
+def _dataset_to_info(dataset: models.Dataset) -> DatasetInfo:
+    return DatasetInfo(
+        name=dataset.name,
+        path=dataset.path,
+        rows=dataset.rows,
+        start=dataset.start_ts,
+        end=dataset.end_ts,
+        columns=dataset.columns,
+        symbol=dataset.symbol,
+        company_name=dataset.company_name,
+        display_name=dataset.display_name,
+        start_label=dataset.start_label,
+        end_label=dataset.end_label,
+        date_range_label=dataset.date_range_label,
+        downloaded_at=dataset.downloaded_at,
+    )
+
+
+def _profile_to_payload(profile: models.DatasetProfile, dataset_name: str) -> DatasetProfilePayload:
+    return DatasetProfilePayload(
+        id=profile.id,
+        datasetName=dataset_name,
+        displayName=profile.display_name,
+        startIndex=profile.start_index,
+        endIndex=profile.end_index,
+        startTimestamp=profile.start_ts,
+        endTimestamp=profile.end_ts,
+        startDate=profile.start_date,
+        endDate=profile.end_date,
+        initialEquity=profile.initial_equity,
+        createdAt=profile.created_at.isoformat(),
+        updatedAt=profile.updated_at.isoformat(),
+    )
+
+
+def _holding_to_payload(holding: models.PortfolioHolding) -> PortfolioHoldingPayload:
+    return PortfolioHoldingPayload(
+        id=holding.id,
+        symbol=holding.symbol,
+        shares=holding.shares,
+        avgCost=holding.avg_cost,
+        costBasis=holding.cost_basis,
+        purchaseDate=holding.purchase_date,
+        referenceDate=holding.reference_date,
+        currentPrice=holding.current_price,
+        currentValue=holding.current_value,
+        color=holding.color,
+        cardColor=holding.card_color,
+        lineThickness=holding.line_thickness,
+        fontSize=holding.font_size,
+        lastUpdate=holding.last_update,
+        meta=holding.meta,
+    )
+
+
+def _portfolio_to_payload(portfolio: models.Portfolio) -> PortfolioPayload:
+    return PortfolioPayload(
+        id=portfolio.id,
+        name=portfolio.name,
+        cash=portfolio.cash,
+        context=portfolio.context,
+        chartConfig=portfolio.chart_config,
+        lineStyles=portfolio.line_styles,
+        notes=portfolio.notes,
+        tags=portfolio.tags,
+        targetAllocations=portfolio.target_allocations,
+        performanceHistory=portfolio.performance_history,
+        holdings=[_holding_to_payload(holding) for holding in portfolio.holdings],
+        createdAt=portfolio.created_at.isoformat(),
+        updatedAt=portfolio.updated_at.isoformat(),
+    )
 
 
 def load_strategy_from_code(code: str, class_name: str) -> Type[Strategy]:
@@ -182,6 +375,41 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/auth/signup", response_model=UserResponse)
+def signup(req: SignupRequest, response: Response, db: Session = Depends(get_db)) -> UserResponse:
+    existing = db.query(models.User).filter(models.User.email == req.email.lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user = models.User(email=req.email.lower(), hashed_password=hash_password(req.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token({"sub": str(user.id)})
+    set_session_cookie(response, token)
+    return UserResponse(id=user.id, email=user.email)
+
+
+@app.post("/auth/login", response_model=UserResponse)
+def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)) -> UserResponse:
+    user = db.query(models.User).filter(models.User.email == req.email.lower()).first()
+    if not user or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token({"sub": str(user.id)})
+    set_session_cookie(response, token)
+    return UserResponse(id=user.id, email=user.email)
+
+
+@app.post("/auth/logout")
+def logout(response: Response) -> Dict[str, str]:
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return {"status": "ok"}
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def me(user: models.User = Depends(get_current_user)) -> UserResponse:
+    return UserResponse(id=user.id, email=user.email)
+
+
 @app.get("/strategies")
 def strategies() -> Dict[str, Any]:
     return {"strategies": list_strategies()}
@@ -200,7 +428,11 @@ def lint_strategy(req: LintRequest) -> Dict[str, str]:
 
 
 @app.post("/backtest", response_model=BacktestResponse)
-def backtest(req: BacktestRequest) -> BacktestResponse:
+def backtest(
+    req: BacktestRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> BacktestResponse:
     run_start = time.perf_counter()
     started_at = datetime.utcnow().isoformat() + "Z"
     run_id = uuid.uuid4().hex
@@ -208,6 +440,13 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
     csv_path = Path(req.csv_path)
     if not csv_path.exists():
         raise HTTPException(status_code=400, detail="CSV path does not exist on server")
+    dataset_record = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.path == str(csv_path))
+        .first()
+    )
+    if not dataset_record:
+        raise HTTPException(status_code=404, detail="Dataset not found for user")
 
     data_feed = CSVBarDataFeed(csv_path=csv_path, symbol=req.symbol)
 
@@ -372,7 +611,17 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
         )
         record = response.model_dump()
         record["saved_at"] = diagnostics["completed_at"]
-        persist_run_record(record)
+        run_entry = models.BacktestRun(
+            run_id=run_id,
+            user_id=user.id,
+            dataset_id=dataset_record.id if dataset_record else None,
+            mode="manual",
+            symbol=req.symbol,
+            saved_at=diagnostics["completed_at"],
+            payload=record,
+        )
+        db.add(run_entry)
+        db.commit()
         return response
 
     # Mechanical mode (original logic)
@@ -492,59 +741,44 @@ def backtest(req: BacktestRequest) -> BacktestResponse:
     )
     record = response.model_dump()
     record["saved_at"] = diagnostics["completed_at"]
-    persist_run_record(record)
+    run_entry = models.BacktestRun(
+        run_id=run_id,
+        user_id=user.id,
+        dataset_id=dataset_record.id if dataset_record else None,
+        mode="mechanical",
+        symbol=req.symbol,
+        saved_at=diagnostics["completed_at"],
+        payload=record,
+    )
+    db.add(run_entry)
+    db.commit()
     return response
 
 
 @app.get("/datasets", response_model=DatasetListResponse)
-def list_datasets() -> DatasetListResponse:
-    if not DATA_DIR.exists():
-        return DatasetListResponse(datasets=[])
-    files: list[DatasetInfo] = []
-    for f in DATA_DIR.glob("*.csv"):
-        if not f.is_file():
-            continue
-        try:
-            meta = inspect_csv(f)
-        except Exception:
-            files.append(DatasetInfo(name=f.name, path=str(f.resolve())))
-            continue
-
-        manifest_meta = downloader.manifest_entry_for_filename(f.name)
-        start_label = (manifest_meta or {}).get("start_date_label") or _ts_to_label(meta.get("start"))
-        end_label = (manifest_meta or {}).get("end_date_label") or _ts_to_label(meta.get("end"))
-        date_range_label = (manifest_meta or {}).get("date_range_label")
-        if not date_range_label and start_label and end_label:
-            date_range_label = f"{start_label} → {end_label}"
-        symbol = (manifest_meta or {}).get("symbol") or _symbol_from_filename(f.name)
-        display_name = (manifest_meta or {}).get("display_name") or symbol
-        files.append(
-            DatasetInfo(
-                name=f.name,
-                path=str(f.resolve()),
-                rows=meta.get("rows"),
-                start=meta.get("start"),
-                end=meta.get("end"),
-                columns=meta.get("columns"),
-                symbol=symbol,
-                company_name=(manifest_meta or {}).get("company_name"),
-                display_name=display_name,
-                start_label=start_label,
-                end_label=end_label,
-                date_range_label=date_range_label,
-                downloaded_at=(manifest_meta or {}).get("downloaded_at"),
-            )
-        )
-
-    files = sorted(files, key=lambda d: d.name.lower())
-    return DatasetListResponse(datasets=files)
+def list_datasets(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> DatasetListResponse:
+    datasets = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id)
+        .order_by(models.Dataset.name.asc())
+        .all()
+    )
+    return DatasetListResponse(datasets=[_dataset_to_info(dataset) for dataset in datasets])
 
 
 @app.post("/upload-dataset", response_model=UploadResponse)
-async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
+async def upload_dataset(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> UploadResponse:
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are accepted")
-    dest_path = DATA_DIR / Path(file.filename).name
+    dest_dir = get_user_data_dir(user.id)
+    dest_path = dest_dir / Path(file.filename).name
     content = await file.read()
     dest_path.write_bytes(content)
     try:
@@ -552,11 +786,55 @@ async def upload_dataset(file: UploadFile = File(...)) -> UploadResponse:
     except Exception as e:
         dest_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"Invalid CSV: {e}")
+    name = dest_path.name
+    symbol = _symbol_from_filename(name)
+    start_label = _ts_to_label(meta.get("start"))
+    end_label = _ts_to_label(meta.get("end"))
+    date_range_label = f"{start_label} → {end_label}" if start_label and end_label else None
+    existing = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == name)
+        .first()
+    )
+    if existing:
+        existing.path = str(dest_path)
+        existing.rows = meta.get("rows")
+        existing.start_ts = meta.get("start")
+        existing.end_ts = meta.get("end")
+        existing.columns = meta.get("columns")
+        existing.symbol = symbol
+        existing.display_name = symbol
+        existing.start_label = start_label
+        existing.end_label = end_label
+        existing.date_range_label = date_range_label
+    else:
+        dataset = models.Dataset(
+            user_id=user.id,
+            name=name,
+            path=str(dest_path),
+            rows=meta.get("rows"),
+            start_ts=meta.get("start"),
+            end_ts=meta.get("end"),
+            columns=meta.get("columns"),
+            symbol=symbol,
+            display_name=symbol,
+            start_label=start_label,
+            end_label=end_label,
+            date_range_label=date_range_label,
+        )
+        db.add(dataset)
+    db.commit()
     return UploadResponse(name=dest_path.name, path=str(dest_path), size=len(content))
 
 
 @app.get("/dataset-preview")
-def dataset_preview(name: str, limit: int = 5, sample: int = 200) -> Dict[str, Any]:
+def dataset_preview(
+    name: str,
+    limit: int = 5,
+    sample: int = 200,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
     if limit <= 0:
         limit = 5
     if limit > 50:
@@ -567,8 +845,15 @@ def dataset_preview(name: str, limit: int = 5, sample: int = 200) -> Dict[str, A
     if sample > 2000:
         sample = 2000
 
-    file_path = (DATA_DIR / name).resolve()
-    if not file_path.exists() or file_path.parent != DATA_DIR:
+    dataset = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == name)
+        .first()
+    )
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    file_path = Path(dataset.path).resolve()
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     try:
@@ -622,29 +907,392 @@ def dataset_preview(name: str, limit: int = 5, sample: int = 200) -> Dict[str, A
     }
 
 
+@app.get("/dataset-profiles", response_model=DatasetProfileListResponse)
+def list_dataset_profiles(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> DatasetProfileListResponse:
+    profiles = (
+        db.query(models.DatasetProfile, models.Dataset.name)
+        .join(models.Dataset, models.Dataset.id == models.DatasetProfile.dataset_id)
+        .filter(models.DatasetProfile.user_id == user.id)
+        .order_by(models.DatasetProfile.created_at.desc())
+        .all()
+    )
+    payloads = [_profile_to_payload(profile, dataset_name) for profile, dataset_name in profiles]
+    return DatasetProfileListResponse(profiles=payloads)
+
+
+@app.post("/dataset-profiles", response_model=DatasetProfilePayload)
+def save_dataset_profile(
+    payload: DatasetProfilePayload,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> DatasetProfilePayload:
+    dataset = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == payload.datasetName)
+        .first()
+    )
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    profile = None
+    if payload.id:
+        profile = (
+            db.query(models.DatasetProfile)
+            .filter(models.DatasetProfile.user_id == user.id, models.DatasetProfile.id == payload.id)
+            .first()
+        )
+    if profile:
+        profile.display_name = payload.displayName
+        profile.start_index = payload.startIndex
+        profile.end_index = payload.endIndex
+        profile.start_ts = payload.startTimestamp
+        profile.end_ts = payload.endTimestamp
+        profile.start_date = payload.startDate
+        profile.end_date = payload.endDate
+        profile.initial_equity = payload.initialEquity
+    else:
+        profile = models.DatasetProfile(
+            user_id=user.id,
+            dataset_id=dataset.id,
+            display_name=payload.displayName,
+            start_index=payload.startIndex,
+            end_index=payload.endIndex,
+            start_ts=payload.startTimestamp,
+            end_ts=payload.endTimestamp,
+            start_date=payload.startDate,
+            end_date=payload.endDate,
+            initial_equity=payload.initialEquity,
+        )
+        db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return _profile_to_payload(profile, dataset.name)
+
+
+@app.delete("/dataset-profiles/{profile_id}")
+def delete_dataset_profile(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
+    deleted = (
+        db.query(models.DatasetProfile)
+        .filter(models.DatasetProfile.user_id == user.id, models.DatasetProfile.id == profile_id)
+        .delete()
+    )
+    if deleted:
+        db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/user-settings/{key}", response_model=UserSettingPayload)
+def get_user_setting(
+    key: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> UserSettingPayload:
+    setting = (
+        db.query(models.UserSetting)
+        .filter(models.UserSetting.user_id == user.id, models.UserSetting.key == key)
+        .first()
+    )
+    return UserSettingPayload(key=key, value=setting.value if setting else None)
+
+
+@app.put("/user-settings/{key}", response_model=UserSettingPayload)
+def set_user_setting(
+    key: str,
+    payload: UserSettingPayload,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> UserSettingPayload:
+    setting = (
+        db.query(models.UserSetting)
+        .filter(models.UserSetting.user_id == user.id, models.UserSetting.key == key)
+        .first()
+    )
+    if setting:
+        setting.value = payload.value
+    else:
+        setting = models.UserSetting(user_id=user.id, key=key, value=payload.value)
+        db.add(setting)
+    db.commit()
+    return UserSettingPayload(key=key, value=payload.value)
+
+
+@app.get("/manual-configs", response_model=ManualConfigListResponse)
+def list_manual_configs(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> ManualConfigListResponse:
+    configs = (
+        db.query(models.ManualConfig, models.Dataset.name)
+        .outerjoin(models.Dataset, models.Dataset.id == models.ManualConfig.dataset_id)
+        .filter(models.ManualConfig.user_id == user.id)
+        .order_by(models.ManualConfig.created_at.desc())
+        .all()
+    )
+    payloads: list[ManualConfigPayload] = []
+    for config, dataset_name in configs:
+        payloads.append(
+            ManualConfigPayload(
+                id=config.id,
+                name=config.name,
+                datasetName=dataset_name,
+                trades=config.trades,
+                initialCash=config.initial_cash,
+                createdAt=config.created_at.isoformat(),
+                updatedAt=config.updated_at.isoformat(),
+            )
+        )
+    return ManualConfigListResponse(configs=payloads)
+
+
+@app.post("/manual-configs", response_model=ManualConfigPayload)
+def save_manual_config(
+    payload: ManualConfigPayload,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> ManualConfigPayload:
+    dataset_id = None
+    if payload.datasetName:
+        dataset = (
+            db.query(models.Dataset)
+            .filter(models.Dataset.user_id == user.id, models.Dataset.name == payload.datasetName)
+            .first()
+        )
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        dataset_id = dataset.id
+    config = None
+    if payload.id:
+        config = (
+            db.query(models.ManualConfig)
+            .filter(models.ManualConfig.user_id == user.id, models.ManualConfig.id == payload.id)
+            .first()
+        )
+    if config:
+        config.name = payload.name
+        config.dataset_id = dataset_id
+        config.trades = payload.trades
+        config.initial_cash = payload.initialCash
+    else:
+        config = models.ManualConfig(
+            user_id=user.id,
+            dataset_id=dataset_id,
+            name=payload.name,
+            trades=payload.trades,
+            initial_cash=payload.initialCash,
+        )
+        db.add(config)
+    db.commit()
+    db.refresh(config)
+    return ManualConfigPayload(
+        id=config.id,
+        name=config.name,
+        datasetName=payload.datasetName,
+        trades=config.trades,
+        initialCash=config.initial_cash,
+        createdAt=config.created_at.isoformat(),
+        updatedAt=config.updated_at.isoformat(),
+    )
+
+
+@app.delete("/manual-configs/{config_id}")
+def delete_manual_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
+    deleted = (
+        db.query(models.ManualConfig)
+        .filter(models.ManualConfig.user_id == user.id, models.ManualConfig.id == config_id)
+        .delete()
+    )
+    if deleted:
+        db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/portfolios", response_model=PortfolioListResponse)
+def list_portfolios(
+    context: str | None = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> PortfolioListResponse:
+    query = db.query(models.Portfolio).filter(models.Portfolio.user_id == user.id)
+    if context:
+        query = query.filter(models.Portfolio.context == context)
+    portfolios = query.order_by(models.Portfolio.updated_at.desc()).all()
+    return PortfolioListResponse(portfolios=[_portfolio_to_payload(p) for p in portfolios])
+
+
+@app.post("/portfolios", response_model=PortfolioPayload)
+def save_portfolio(
+    payload: PortfolioPayload,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> PortfolioPayload:
+    portfolio = None
+    if payload.id:
+        portfolio = (
+            db.query(models.Portfolio)
+            .filter(models.Portfolio.user_id == user.id, models.Portfolio.id == payload.id)
+            .first()
+        )
+    if portfolio:
+        portfolio.name = payload.name
+        portfolio.cash = payload.cash
+        portfolio.context = payload.context
+        portfolio.chart_config = payload.chartConfig
+        portfolio.line_styles = payload.lineStyles
+        portfolio.notes = payload.notes
+        portfolio.tags = payload.tags
+        portfolio.target_allocations = payload.targetAllocations
+        portfolio.performance_history = payload.performanceHistory
+        portfolio.holdings.clear()
+    else:
+        portfolio = models.Portfolio(
+            user_id=user.id,
+            name=payload.name,
+            cash=payload.cash,
+            context=payload.context,
+            chart_config=payload.chartConfig,
+            line_styles=payload.lineStyles,
+            notes=payload.notes,
+            tags=payload.tags,
+            target_allocations=payload.targetAllocations,
+            performance_history=payload.performanceHistory,
+        )
+        db.add(portfolio)
+        db.flush()
+    for holding in payload.holdings:
+        portfolio.holdings.append(
+            models.PortfolioHolding(
+                symbol=holding.symbol,
+                shares=holding.shares,
+                avg_cost=holding.avgCost,
+                cost_basis=holding.costBasis,
+                purchase_date=holding.purchaseDate,
+                reference_date=holding.referenceDate,
+                current_price=holding.currentPrice,
+                current_value=holding.currentValue,
+                color=holding.color,
+                card_color=holding.cardColor,
+                line_thickness=holding.lineThickness,
+                font_size=holding.fontSize,
+                last_update=holding.lastUpdate,
+                meta=holding.meta,
+            )
+        )
+    db.commit()
+    db.refresh(portfolio)
+    return _portfolio_to_payload(portfolio)
+
+
+@app.delete("/portfolios/{portfolio_id}")
+def delete_portfolio(
+    portfolio_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
+    deleted = (
+        db.query(models.Portfolio)
+        .filter(models.Portfolio.user_id == user.id, models.Portfolio.id == portfolio_id)
+        .delete()
+    )
+    if deleted:
+        db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/line-styles", response_model=LineStyleListResponse)
+def list_line_styles(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> LineStyleListResponse:
+    styles = (
+        db.query(models.LineStyle)
+        .filter(models.LineStyle.user_id == user.id)
+        .order_by(models.LineStyle.symbol.asc())
+        .all()
+    )
+    return LineStyleListResponse(
+        styles=[LineStylePayload(symbol=s.symbol, color=s.color, thickness=s.thickness) for s in styles]
+    )
+
+
+@app.post("/line-styles", response_model=LineStyleListResponse)
+def save_line_styles(
+    payload: LineStyleListResponse,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> LineStyleListResponse:
+    for style in payload.styles:
+        existing = (
+            db.query(models.LineStyle)
+            .filter(models.LineStyle.user_id == user.id, models.LineStyle.symbol == style.symbol)
+            .first()
+        )
+        if existing:
+            existing.color = style.color
+            existing.thickness = style.thickness
+        else:
+            db.add(
+                models.LineStyle(
+                    user_id=user.id,
+                    symbol=style.symbol,
+                    color=style.color,
+                    thickness=style.thickness,
+                )
+            )
+    db.commit()
+    return payload
+
+
 @app.get("/runs")
-def list_runs() -> Dict[str, Any]:
-    runs = load_run_records()
-    summaries = [
-        {
-            "run_id": r.get("run_id"),
-            "saved_at": r.get("saved_at") or r.get("diagnostics", {}).get("completed_at"),
-            "symbol": r.get("config", {}).get("symbol"),
-            "total_return": r.get("stats", {}).get("total_return"),
-            "max_drawdown": r.get("stats", {}).get("max_drawdown"),
-        }
-        for r in runs
-    ]
+def list_runs(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    runs = (
+        db.query(models.BacktestRun)
+        .filter(models.BacktestRun.user_id == user.id)
+        .order_by(models.BacktestRun.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    summaries = []
+    for run in runs:
+        payload = run.payload or {}
+        summaries.append(
+            {
+                "run_id": run.run_id,
+                "saved_at": run.saved_at or (payload.get("diagnostics", {}) or {}).get("completed_at"),
+                "symbol": run.symbol or (payload.get("config", {}) or {}).get("symbol"),
+                "total_return": (payload.get("stats", {}) or {}).get("total_return"),
+                "max_drawdown": (payload.get("stats", {}) or {}).get("max_drawdown"),
+            }
+        )
     return {"runs": summaries}
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: str) -> Dict[str, Any]:
-    runs = load_run_records()
-    for record in runs:
-        if record.get("run_id") == run_id:
-            return record
-    raise HTTPException(status_code=404, detail="Run not found")
+def get_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    run = (
+        db.query(models.BacktestRun)
+        .filter(models.BacktestRun.user_id == user.id, models.BacktestRun.run_id == run_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run.payload
 
 
 @app.post("/download-symbol")
@@ -654,6 +1302,8 @@ def download_symbol(
     end_date: str | None = None,
     period: str = "max",
     refresh: bool = False,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
     Download historical data for a symbol from Yahoo Finance.
@@ -667,6 +1317,7 @@ def download_symbol(
     Returns:
         Download status and metadata
     """
+    downloader = DataDownloader(get_user_data_dir(user.id))
     result = downloader.download_symbol(
         symbol=symbol.upper(),
         start_date=start_date,
@@ -678,12 +1329,56 @@ def download_symbol(
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result.get("error", "Download failed"))
 
+    name = result.get("filename")
+    if not name:
+        return result
+    existing = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == name)
+        .first()
+    )
+    if existing:
+        existing.path = result.get("path", existing.path)
+        existing.rows = result.get("rows")
+        existing.start_ts = result.get("start")
+        existing.end_ts = result.get("end")
+        existing.columns = result.get("columns")
+        existing.symbol = result.get("symbol")
+        existing.company_name = result.get("company_name")
+        existing.display_name = result.get("display_name")
+        existing.start_label = result.get("start_date_label")
+        existing.end_label = result.get("end_date_label")
+        existing.date_range_label = result.get("date_range_label")
+        existing.downloaded_at = result.get("downloaded_at")
+    else:
+        dataset = models.Dataset(
+            user_id=user.id,
+            name=name,
+            path=result.get("path"),
+            rows=result.get("rows"),
+            start_ts=result.get("start"),
+            end_ts=result.get("end"),
+            columns=result.get("columns"),
+            symbol=result.get("symbol"),
+            company_name=result.get("company_name"),
+            display_name=result.get("display_name"),
+            start_label=result.get("start_date_label"),
+            end_label=result.get("end_date_label"),
+            date_range_label=result.get("date_range_label"),
+            downloaded_at=result.get("downloaded_at"),
+        )
+        db.add(dataset)
+    db.commit()
     return result
 
 
 @app.get("/symbol-info/{symbol}")
-def get_symbol_info(symbol: str) -> Dict[str, Any]:
+def get_symbol_info(
+    symbol: str,
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Get information about a symbol."""
+    downloader = DataDownloader(get_user_data_dir(user.id))
     result = downloader.get_symbol_info(symbol.upper())
 
     if not result["success"]:
@@ -693,7 +1388,11 @@ def get_symbol_info(symbol: str) -> Dict[str, Any]:
 
 
 @app.get("/annotations")
-def get_annotations(dataset: str) -> AnnotationSet:
+def get_annotations(
+    dataset: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> AnnotationSet:
     """
     Get annotations for a dataset.
 
@@ -703,20 +1402,35 @@ def get_annotations(dataset: str) -> AnnotationSet:
     Returns:
         AnnotationSet with all annotations
     """
-    annotation_file = ANNOTATIONS_DIR / f"{dataset}.json"
-
-    if not annotation_file.exists():
+    dataset_record = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == dataset)
+        .first()
+    )
+    if not dataset_record:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    record = (
+        db.query(models.DatasetAnnotation)
+        .filter(
+            models.DatasetAnnotation.user_id == user.id,
+            models.DatasetAnnotation.dataset_id == dataset_record.id,
+        )
+        .first()
+    )
+    if not record:
         return AnnotationSet(dataset_name=dataset, annotations=[])
-
     try:
-        data = json.loads(annotation_file.read_text())
-        return AnnotationSet(**data)
+        return AnnotationSet(**record.payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load annotations: {e}")
 
 
 @app.post("/annotations")
-def save_annotations(annotation_set: AnnotationSet) -> Dict[str, str]:
+def save_annotations(
+    annotation_set: AnnotationSet,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
     """
     Save annotations for a dataset.
 
@@ -726,17 +1440,41 @@ def save_annotations(annotation_set: AnnotationSet) -> Dict[str, str]:
     Returns:
         Success message
     """
-    annotation_file = ANNOTATIONS_DIR / f"{annotation_set.dataset_name}.json"
-
-    try:
-        annotation_file.write_text(annotation_set.model_dump_json(indent=2))
-        return {"status": "ok", "message": f"Saved {len(annotation_set.annotations)} annotations"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save annotations: {e}")
+    dataset_record = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == annotation_set.dataset_name)
+        .first()
+    )
+    if not dataset_record:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    payload = annotation_set.model_dump()
+    existing = (
+        db.query(models.DatasetAnnotation)
+        .filter(
+            models.DatasetAnnotation.user_id == user.id,
+            models.DatasetAnnotation.dataset_id == dataset_record.id,
+        )
+        .first()
+    )
+    if existing:
+        existing.payload = payload
+    else:
+        record = models.DatasetAnnotation(
+            user_id=user.id,
+            dataset_id=dataset_record.id,
+            payload=payload,
+        )
+        db.add(record)
+    db.commit()
+    return {"status": "ok", "message": f"Saved {len(annotation_set.annotations)} annotations"}
 
 
 @app.delete("/annotations")
-def delete_annotations(dataset: str) -> Dict[str, str]:
+def delete_annotations(
+    dataset: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
     """
     Delete all annotations for a dataset.
 
@@ -746,11 +1484,21 @@ def delete_annotations(dataset: str) -> Dict[str, str]:
     Returns:
         Success message
     """
-    annotation_file = ANNOTATIONS_DIR / f"{dataset}.json"
-
-    if annotation_file.exists():
-        annotation_file.unlink()
-
+    dataset_record = (
+        db.query(models.Dataset)
+        .filter(models.Dataset.user_id == user.id, models.Dataset.name == dataset)
+        .first()
+    )
+    if dataset_record:
+        (
+            db.query(models.DatasetAnnotation)
+            .filter(
+                models.DatasetAnnotation.user_id == user.id,
+                models.DatasetAnnotation.dataset_id == dataset_record.id,
+            )
+            .delete()
+        )
+        db.commit()
     return {"status": "ok", "message": "Annotations deleted"}
 
 
@@ -759,7 +1507,7 @@ def delete_annotations(dataset: str) -> Dict[str, str]:
 class StockPricesRequest(BaseModel):
     """Request model for fetching stock prices"""
     symbols: List[str]
-    range: str = "1M"  # 1D, 1W, 1M, 3M, 6M, 1Y, ALL
+    range: str = "1M"  # 1D, 1W, 1M, 3M, 6M, 1Y, 2Y, 3Y, ALL
 
 
 class StockPriceData(BaseModel):
@@ -772,7 +1520,10 @@ class StockPriceData(BaseModel):
 
 
 @app.post("/api/stock-prices")
-async def get_stock_prices(req: StockPricesRequest):
+async def get_stock_prices(
+    req: StockPricesRequest,
+    user: models.User = Depends(get_current_user),
+):
     """
     Fetch current and historical stock prices using yfinance.
 
@@ -793,6 +1544,8 @@ async def get_stock_prices(req: StockPricesRequest):
         "3M": "3mo",
         "6M": "6mo",
         "1Y": "1y",
+        "2Y": "2y",
+        "3Y": "3y",
         "ALL": "max",
     }
 

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { apiFetch } from "@/app/lib/api";
+import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
 // Minimalistic Icons
 function ChartIcon({ className = "" }: { className?: string }) {
@@ -104,7 +106,7 @@ function AlertIcon({ className = "" }: { className?: string }) {
 }
 
 interface PortfolioHolding {
-  id: string;
+  id: number;
   symbol: string;
   shares: number;
   avgCost: number;
@@ -114,7 +116,7 @@ interface PortfolioHolding {
 }
 
 interface Portfolio {
-  id: string;
+  id: number;
   name: string;
   holdings: PortfolioHolding[];
   cash: number;
@@ -131,9 +133,10 @@ interface Portfolio {
 }
 
 export default function PortfolioPage() {
+  const { loading: authLoading } = useRequireAuth();
   // Multi-portfolio state
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [activePortfolioId, setActivePortfolioId] = useState<string | null>(null);
+  const [activePortfolioId, setActivePortfolioId] = useState<number | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPortfolioName, setNewPortfolioName] = useState("");
 
@@ -144,9 +147,11 @@ export default function PortfolioPage() {
   const [newShares, setNewShares] = useState(100);
   const [newAvgCost, setNewAvgCost] = useState(0);
   const [isLoadingPrices, setIsLoadingPrices] = useState(false);
+  const [isFetchingCost, setIsFetchingCost] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [isLoadingSymbols, setIsLoadingSymbols] = useState(false);
+  const [purchaseDate, setPurchaseDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
   // Timeline state
   const [showTimeline, setShowTimeline] = useState(false);
@@ -154,48 +159,132 @@ export default function PortfolioPage() {
 
   // Comparison view state
   const [showComparison, setShowComparison] = useState(false);
+  const saveTimeoutRef = useRef<number | null>(null);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8002";
+  if (authLoading) return null;
 
-  // Load portfolios from localStorage on mount
+  const buildPortfolioPayload = (portfolio: Portfolio) => {
+    return {
+      id: portfolio.id,
+      name: portfolio.name,
+      context: "builder",
+      cash: portfolio.cash,
+      notes: portfolio.notes,
+      tags: portfolio.tags,
+      targetAllocations: portfolio.targetAllocations,
+      performanceHistory: portfolio.performanceHistory,
+      holdings: portfolio.holdings.map((holding) => ({
+        id: holding.id,
+        symbol: holding.symbol,
+        shares: holding.shares,
+        avgCost: holding.avgCost,
+        costBasis: holding.avgCost,
+        currentPrice: holding.currentPrice,
+        currentValue: holding.currentValue,
+        purchaseDate: holding.addedAt ? new Date(holding.addedAt).getTime() : undefined,
+      })),
+    };
+  };
+
   useEffect(() => {
-    const saved = localStorage.getItem("priorsystems:portfolios");
-    const savedActiveId = localStorage.getItem("priorsystems:active-portfolio-id");
+    if (typeof window === "undefined" || authLoading) return;
+    const stored = window.localStorage.getItem("priorsystems:portfolios");
+    const storedActive = window.localStorage.getItem("priorsystems:active-portfolio-id");
+    if (!stored) return;
 
-    if (saved) {
-      const loadedPortfolios = JSON.parse(saved);
-      setPortfolios(loadedPortfolios);
+    const migrate = async () => {
+      try {
+        const parsed = JSON.parse(stored) as Portfolio[];
+        let newActiveId: number | null = null;
+        for (const portfolio of parsed) {
+          const payload = {
+            name: portfolio.name,
+            context: "builder",
+            cash: portfolio.cash,
+            notes: portfolio.notes,
+            tags: portfolio.tags,
+            targetAllocations: portfolio.targetAllocations,
+            performanceHistory: portfolio.performanceHistory,
+            holdings: portfolio.holdings.map((holding) => ({
+              symbol: holding.symbol,
+              shares: holding.shares,
+              avgCost: holding.avgCost,
+              costBasis: holding.avgCost,
+              currentPrice: holding.currentPrice,
+              currentValue: holding.currentValue,
+              purchaseDate: holding.addedAt ? new Date(holding.addedAt).getTime() : undefined,
+            })),
+          };
+          const res = await apiFetch("/portfolios", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          if (res.ok && storedActive && String(portfolio.id) === storedActive) {
+            const saved = await res.json();
+            newActiveId = saved.id;
+          }
+        }
+        if (newActiveId) {
+          await apiFetch("/user-settings/active-portfolio-id", {
+            method: "PUT",
+            body: JSON.stringify({ key: "active-portfolio-id", value: newActiveId }),
+          });
+        }
+      } catch (error) {
+        console.error("Failed to migrate portfolio storage:", error);
+      } finally {
+        window.localStorage.removeItem("priorsystems:portfolios");
+        window.localStorage.removeItem("priorsystems:active-portfolio-id");
+      }
+    };
 
-      if (savedActiveId && loadedPortfolios.find((p: Portfolio) => p.id === savedActiveId)) {
-        setActivePortfolioId(savedActiveId);
-        const activePortfolio = loadedPortfolios.find((p: Portfolio) => p.id === savedActiveId);
+    migrate();
+  }, [authLoading]);
+
+  // Load portfolios from API on mount
+  useEffect(() => {
+    const loadPortfolios = async () => {
+      try {
+        const [portfoliosRes, activeRes] = await Promise.all([
+          apiFetch("/portfolios?context=builder"),
+          apiFetch("/user-settings/active-portfolio-id"),
+        ]);
+        const portfoliosData = await portfoliosRes.json();
+        const activeData = await activeRes.json();
+        const loadedPortfolios = portfoliosData.portfolios || [];
+        setPortfolios(loadedPortfolios);
+
+        const activeId = typeof activeData.value === "number" ? activeData.value : null;
+        const activePortfolio =
+          (activeId ? loadedPortfolios.find((p: Portfolio) => p.id === activeId) : null) ||
+          loadedPortfolios[0];
+
         if (activePortfolio) {
+          setActivePortfolioId(activePortfolio.id);
           setHoldings(activePortfolio.holdings);
           setCash(activePortfolio.cash);
+        } else {
+          const defaultPortfolio: Portfolio = {
+            id: Date.now(),
+            name: "My Portfolio",
+            holdings: [],
+            cash: 100000,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setPortfolios([defaultPortfolio]);
+          setActivePortfolioId(defaultPortfolio.id);
+          setHoldings(defaultPortfolio.holdings);
+          setCash(defaultPortfolio.cash);
         }
-      } else if (loadedPortfolios.length > 0) {
-        setActivePortfolioId(loadedPortfolios[0].id);
-        setHoldings(loadedPortfolios[0].holdings);
-        setCash(loadedPortfolios[0].cash);
+      } catch (error) {
+        console.error("Failed to load portfolios:", error);
       }
-    } else {
-      // Create default portfolio if none exists
-      const defaultPortfolio: Portfolio = {
-        id: crypto.randomUUID(),
-        name: "My Portfolio",
-        holdings: [],
-        cash: 100000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setPortfolios([defaultPortfolio]);
-      setActivePortfolioId(defaultPortfolio.id);
-      localStorage.setItem("priorsystems:portfolios", JSON.stringify([defaultPortfolio]));
-      localStorage.setItem("priorsystems:active-portfolio-id", defaultPortfolio.id);
-    }
+    };
+    loadPortfolios();
   }, []);
 
-  // Save active portfolio changes to localStorage
+  // Save active portfolio changes to state
   useEffect(() => {
     if (portfolios.length > 0 && activePortfolioId) {
       const updatedPortfolios = portfolios.map(p =>
@@ -204,16 +293,43 @@ export default function PortfolioPage() {
           : p
       );
       setPortfolios(updatedPortfolios);
-      localStorage.setItem("priorsystems:portfolios", JSON.stringify(updatedPortfolios));
     }
   }, [holdings, cash]);
+
+  useEffect(() => {
+    if (portfolios.length === 0) return;
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = window.setTimeout(() => {
+      portfolios.forEach((portfolio) => {
+        apiFetch("/portfolios", {
+          method: "POST",
+          body: JSON.stringify(buildPortfolioPayload(portfolio)),
+        }).catch((error) => {
+          console.error("Failed to persist portfolio:", error);
+        });
+      });
+      if (activePortfolioId) {
+        apiFetch("/user-settings/active-portfolio-id", {
+          method: "PUT",
+          body: JSON.stringify({ key: "active-portfolio-id", value: activePortfolioId }),
+        }).catch(() => undefined);
+      }
+    }, 800);
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [portfolios, activePortfolioId]);
 
   // Create new portfolio
   const createPortfolio = () => {
     if (!newPortfolioName.trim()) return;
 
     const newPortfolio: Portfolio = {
-      id: crypto.randomUUID(),
+      id: Date.now(),
       name: newPortfolioName.trim(),
       holdings: [],
       cash: 100000,
@@ -228,24 +344,20 @@ export default function PortfolioPage() {
     setCash(100000);
     setNewPortfolioName("");
     setShowCreateModal(false);
-
-    localStorage.setItem("priorsystems:portfolios", JSON.stringify(updatedPortfolios));
-    localStorage.setItem("priorsystems:active-portfolio-id", newPortfolio.id);
   };
 
   // Switch to different portfolio
-  const switchPortfolio = (portfolioId: string) => {
+  const switchPortfolio = (portfolioId: number) => {
     const portfolio = portfolios.find(p => p.id === portfolioId);
     if (!portfolio) return;
 
     setActivePortfolioId(portfolioId);
     setHoldings(portfolio.holdings);
     setCash(portfolio.cash);
-    localStorage.setItem("priorsystems:active-portfolio-id", portfolioId);
   };
 
   // Delete portfolio
-  const deletePortfolio = (portfolioId: string) => {
+  const deletePortfolio = (portfolioId: number) => {
     if (portfolios.length <= 1) {
       alert("Cannot delete the last portfolio");
       return;
@@ -261,14 +373,11 @@ export default function PortfolioPage() {
       setActivePortfolioId(newActive.id);
       setHoldings(newActive.holdings);
       setCash(newActive.cash);
-      localStorage.setItem("priorsystems:active-portfolio-id", newActive.id);
     }
-
-    localStorage.setItem("priorsystems:portfolios", JSON.stringify(updatedPortfolios));
   };
 
   // Rename portfolio
-  const renamePortfolio = (portfolioId: string) => {
+  const renamePortfolio = (portfolioId: number) => {
     const newName = prompt("Enter new portfolio name:");
     if (!newName || !newName.trim()) return;
 
@@ -278,7 +387,6 @@ export default function PortfolioPage() {
         : p
     );
     setPortfolios(updatedPortfolios);
-    localStorage.setItem("priorsystems:portfolios", JSON.stringify(updatedPortfolios));
   };
 
   // Load available symbols from datasets
@@ -286,7 +394,7 @@ export default function PortfolioPage() {
     const fetchSymbols = async () => {
       setIsLoadingSymbols(true);
       try {
-        const response = await fetch(`${apiBase}/datasets`);
+        const response = await apiFetch("/datasets");
         const data = await response.json();
 
         // API returns { datasets: [...] }
@@ -321,7 +429,83 @@ export default function PortfolioPage() {
     };
 
     fetchSymbols();
-  }, [apiBase]);
+  }, []);
+
+  // Fetch historical price for a specific date
+  const fetchHistoricalPrice = async (symbol: string, date: string) => {
+    setIsFetchingCost(true);
+    try {
+      // Find matching dataset
+      const response = await apiFetch("/datasets");
+      const data = await response.json();
+      const datasets = data.datasets || data;
+
+      const matchingDataset = datasets.find((d: any) =>
+        d.name.toUpperCase().includes(symbol.toUpperCase())
+      );
+
+      if (!matchingDataset) {
+        setError(`No dataset found for ${symbol}`);
+        setTimeout(() => setError(null), 3000);
+        setIsFetchingCost(false);
+        return null;
+      }
+
+      // Get full dataset
+      const previewResponse = await apiFetch(
+        `/dataset-preview?name=${encodeURIComponent(matchingDataset.name)}&limit=1000`
+      );
+      const preview = await previewResponse.json();
+
+      // API returns 'head' not 'rows'
+      const rows = preview.head || preview.rows || [];
+
+      if (rows.length === 0) {
+        setError(`No data found for ${symbol}`);
+        setTimeout(() => setError(null), 3000);
+        setIsFetchingCost(false);
+        return null;
+      }
+
+      // Find closest date
+      const targetDate = new Date(date).getTime();
+      let closestRow = rows[0];
+      let closestDiff = Math.abs(new Date(rows[0].timestamp).getTime() - targetDate);
+
+      for (const row of rows) {
+        const rowDate = new Date(row.timestamp).getTime();
+        const diff = Math.abs(rowDate - targetDate);
+        if (diff < closestDiff) {
+          closestDiff = diff;
+          closestRow = row;
+        }
+      }
+
+      const price = closestRow.close || 0;
+      setIsFetchingCost(false);
+      return price;
+    } catch (err) {
+      console.error("Failed to fetch historical price", err);
+      setError("Failed to fetch price");
+      setTimeout(() => setError(null), 3000);
+      setIsFetchingCost(false);
+      return null;
+    }
+  };
+
+  // Auto-calculate cost when symbol or shares change
+  const handleSymbolOrSharesChange = async (symbol?: string, shares?: number) => {
+    const sym = symbol !== undefined ? symbol : newSymbol;
+    const shr = shares !== undefined ? shares : newShares;
+    const date = showTimeline ? timelineDate : purchaseDate;
+
+    if (sym.trim() && shr > 0) {
+      const price = await fetchHistoricalPrice(sym, date);
+      if (price !== null) {
+        setNewAvgCost(price);
+      }
+    }
+  };
 
   const addHolding = () => {
     if (!newSymbol.trim()) {
@@ -337,11 +521,11 @@ export default function PortfolioPage() {
     }
 
     const newHolding: PortfolioHolding = {
-      id: `${Date.now()}_${newSymbol}`,
+      id: Date.now(),
       symbol: newSymbol.toUpperCase(),
       shares: newShares,
       avgCost: newAvgCost,
-      addedAt: showTimeline ? timelineDate : new Date().toISOString(),
+      addedAt: showTimeline ? timelineDate : purchaseDate,
     };
 
     setHoldings([...holdings, newHolding]);
@@ -350,7 +534,7 @@ export default function PortfolioPage() {
     setNewAvgCost(0);
   };
 
-  const removeHolding = (id: string) => {
+  const removeHolding = (id: number) => {
     setHoldings(holdings.filter(h => h.id !== id));
   };
 
@@ -364,8 +548,9 @@ export default function PortfolioPage() {
         holdings.map(async (holding) => {
           try {
             // Try to get latest price from a dataset (if exists)
-            const response = await fetch(`${apiBase}/datasets`);
-            const datasets = await response.json();
+            const response = await apiFetch("/datasets");
+            const data = await response.json();
+            const datasets = data.datasets || data;
 
             // Find a dataset matching this symbol
             const matchingDataset = datasets.find((d: any) =>
@@ -374,14 +559,17 @@ export default function PortfolioPage() {
 
             if (matchingDataset) {
               // Get preview to extract latest price
-              const previewResponse = await fetch(
-                `${apiBase}/dataset-preview?name=${encodeURIComponent(matchingDataset.name)}&limit=1`
+              const previewResponse = await apiFetch(
+                `/dataset-preview?name=${encodeURIComponent(matchingDataset.name)}&limit=1`
               );
               const preview = await previewResponse.json();
 
-              if (preview.rows && preview.rows.length > 0) {
-                const lastRow = preview.rows[0];
-                const closePrice = lastRow.Close || lastRow.close || holding.avgCost;
+              // API returns 'head' not 'rows'
+              const rows = preview.head || preview.rows || [];
+
+              if (rows.length > 0) {
+                const lastRow = rows[0];
+                const closePrice = lastRow.close || holding.avgCost;
 
                 return {
                   ...holding,
@@ -488,7 +676,7 @@ export default function PortfolioPage() {
             <span className="text-sm text-gray-400">Portfolio:</span>
             <select
               value={activePortfolioId || ""}
-              onChange={(e) => switchPortfolio(e.target.value)}
+              onChange={(e) => switchPortfolio(Number(e.target.value))}
               className="px-4 py-2 rounded-lg border border-gray-700 bg-gray-800 text-white hover:border-gray-600 transition text-sm font-semibold outline-none focus:border-purple-500"
             >
               {portfolios.map((portfolio) => (
@@ -569,18 +757,16 @@ export default function PortfolioPage() {
                     // Generate new ID to avoid conflicts
                     const newPortfolio: Portfolio = {
                       ...imported,
-                      id: crypto.randomUUID(),
+                      id: Date.now(),
                       name: `${imported.name} (Imported)`,
                       createdAt: new Date().toISOString(),
                       updatedAt: new Date().toISOString(),
                     };
                     const updatedPortfolios = [...portfolios, newPortfolio];
                     setPortfolios(updatedPortfolios);
-                    localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
                     setActivePortfolioId(newPortfolio.id);
                     setHoldings(newPortfolio.holdings);
                     setCash(newPortfolio.cash);
-                    localStorage.setItem('priorsystems:active-portfolio-id', newPortfolio.id);
                     alert('Portfolio imported successfully!');
                   } catch (error) {
                     alert('Failed to import portfolio. Please check the file format.');
@@ -920,7 +1106,6 @@ export default function PortfolioPage() {
                           : p
                       );
                       setPortfolios(updatedPortfolios);
-                      localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
                     }}
                     placeholder="Add notes about this portfolio..."
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-purple-500 resize-none"
@@ -933,8 +1118,9 @@ export default function PortfolioPage() {
                   <label className="block text-xs text-gray-400 mb-1">Tags (comma-separated)</label>
                   <input
                     type="text"
-                    value={activePortfolio.tags?.join(', ') || ''}
-                    onChange={(e) => {
+                    defaultValue={activePortfolio.tags?.join(', ') || ''}
+                    onBlur={(e) => {
+                      // Process tags on blur to ensure proper formatting
                       const tags = e.target.value.split(',').map(t => t.trim()).filter(t => t.length > 0);
                       const updatedPortfolios = portfolios.map(p =>
                         p.id === activePortfolioId
@@ -942,7 +1128,6 @@ export default function PortfolioPage() {
                           : p
                       );
                       setPortfolios(updatedPortfolios);
-                      localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
                     }}
                     placeholder="long-term, growth, tech"
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
@@ -973,7 +1158,6 @@ export default function PortfolioPage() {
                         : p
                     );
                     setPortfolios(updatedPortfolios);
-                    localStorage.setItem('priorsystems:portfolios', JSON.stringify(updatedPortfolios));
                     alert('Performance snapshot saved!');
                   }}
                   className="w-full px-3 py-2 rounded-lg bg-gray-800 text-white hover:bg-gray-700 transition text-xs font-semibold"
@@ -1041,6 +1225,24 @@ export default function PortfolioPage() {
             </div>
 
             <div className="space-y-4">
+              {!showTimeline && (
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Purchase Date</label>
+                  <input
+                    type="date"
+                    value={purchaseDate}
+                    onChange={(e) => {
+                      setPurchaseDate(e.target.value);
+                      // Re-fetch price for new date if symbol is selected
+                      if (newSymbol.trim()) {
+                        handleSymbolOrSharesChange(newSymbol, newShares);
+                      }
+                    }}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-gray-400 mb-1">
                   Symbol {isLoadingSymbols && <span className="text-gray-500">(Loading...)</span>}
@@ -1049,7 +1251,10 @@ export default function PortfolioPage() {
                   <div className="relative">
                     <select
                       value={newSymbol}
-                      onChange={(e) => setNewSymbol(e.target.value)}
+                      onChange={(e) => {
+                        setNewSymbol(e.target.value);
+                        handleSymbolOrSharesChange(e.target.value, newShares);
+                      }}
                       className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 appearance-none cursor-pointer scrollbar-hide"
                     >
                       <option value="" className="bg-gray-800">Select a symbol...</option>
@@ -1069,7 +1274,10 @@ export default function PortfolioPage() {
                   <input
                     type="text"
                     value={newSymbol}
-                    onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      setNewSymbol(e.target.value.toUpperCase());
+                      handleSymbolOrSharesChange(e.target.value.toUpperCase(), newShares);
+                    }}
                     placeholder="AAPL"
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-blue-500"
                   />
@@ -1081,28 +1289,46 @@ export default function PortfolioPage() {
                 <input
                   type="number"
                   value={newShares}
-                  onChange={(e) => setNewShares(parseInt(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const shares = parseInt(e.target.value) || 0;
+                    setNewShares(shares);
+                    handleSymbolOrSharesChange(newSymbol, shares);
+                  }}
                   min="1"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Avg Cost per Share</label>
-                <input
-                  type="number"
-                  value={newAvgCost}
-                  onChange={(e) => setNewAvgCost(parseFloat(e.target.value) || 0)}
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                />
+                <label className="block text-xs text-gray-400 mb-1">
+                  Cost per Share {isFetchingCost && <span className="text-gray-500">(Calculating...)</span>}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={newAvgCost}
+                    onChange={(e) => setNewAvgCost(parseFloat(e.target.value) || 0)}
+                    min="0"
+                    step="0.01"
+                    placeholder="Auto-calculated"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                    readOnly
+                  />
+                  {newAvgCost > 0 && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                      Total: ${(newAvgCost * newShares).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Automatically calculated from historical data
+                </p>
               </div>
 
               <button
                 onClick={addHolding}
-                className="w-full px-4 py-2 rounded-lg bg-white text-black hover:bg-gray-200 transition font-semibold"
+                disabled={isFetchingCost || newAvgCost === 0}
+                className="w-full px-4 py-2 rounded-lg bg-white text-black hover:bg-gray-200 disabled:bg-gray-700 disabled:text-gray-500 transition font-semibold"
               >
                 {showTimeline ? `Add at ${timelineDate}` : 'Add to Portfolio'}
               </button>

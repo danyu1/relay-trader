@@ -15,7 +15,11 @@ import {
   Filler,
 } from "chart.js";
 import "chartjs-adapter-date-fns";
+import { apiFetch } from "@/app/lib/api";
+import { useRequireAuth } from "@/app/hooks/useRequireAuth";
+import { UserDisplay } from "@/app/components/UserDisplay";
 
+// Register Chart.js components
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
 // ==================== TYPES ====================
@@ -39,6 +43,11 @@ interface StockPosition {
   historicalData: { timestamp: number; price: number }[];
 }
 
+interface LineStyle {
+  color: string;
+  thickness: number;
+}
+
 interface PortfolioState {
   positions: StockPosition[];
   totalValue: number;
@@ -55,7 +64,7 @@ interface ChartConfig {
   showGlow: boolean;
 }
 
-type TimeRange = "1D" | "1W" | "1M" | "3M" | "6M" | "1Y" | "ALL";
+type TimeRange = "1D" | "1W" | "1M" | "3M" | "6M" | "1Y" | "2Y" | "3Y" | "ALL";
 type ChartView = "portfolio" | "earnings";
 
 const PRESET_COLORS = [
@@ -69,13 +78,22 @@ const PRESET_COLORS = [
   "#ec4899", // pink
 ];
 
-const STORAGE_KEY = "priorsystems:live-portfolio";
-const SAVED_PORTFOLIOS_KEY = "priorsystems:saved-portfolios";
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
+const DEFAULT_CHART_CONFIG: ChartConfig = {
+  backgroundColor: "#0a0a0f",
+  gridOpacity: 0.1,
+  axisColor: "#6b7280",
+  lineThickness: 2,
+  showGlow: false,
+};
+
+const CURRENT_CONTEXT = "live-current";
+const SAVED_CONTEXT = "live-prices";
+const CURRENT_PORTFOLIO_NAME = "Current Portfolio";
 
 // ==================== MAIN COMPONENT ====================
 
 export default function LivePricesPage() {
+  const { user, loading: authLoading } = useRequireAuth();
   // State
   const [portfolio, setPortfolio] = useState<PortfolioState>({
     positions: [],
@@ -93,13 +111,122 @@ export default function LivePricesPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
-  const [chartConfig, setChartConfig] = useState<ChartConfig>({
-    backgroundColor: "#0a0a0f",
-    gridOpacity: 0.1,
-    axisColor: "#6b7280",
-    lineThickness: 2,
-    showGlow: false,
-  });
+  const [chartConfig, setChartConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
+  const [lineStyles, setLineStyles] = useState<Record<string, LineStyle>>({});
+  const [currentPortfolioId, setCurrentPortfolioId] = useState<number | null>(null);
+  const [savedPortfolios, setSavedPortfolios] = useState<
+    { id: number; name: string; savedAt: number; positionCount: number; payload?: any }[]
+  >([]);
+  const saveTimeoutRef = useRef<number | null>(null);
+  const lineStyleTimeoutRef = useRef<number | null>(null);
+
+  const buildDefaultLineStyles = useCallback(
+    (positions: StockPosition[], thickness: number = DEFAULT_CHART_CONFIG.lineThickness) => {
+    const symbols: string[] = [];
+    positions.forEach((position) => {
+      if (!symbols.includes(position.symbol)) {
+        symbols.push(position.symbol);
+      }
+    });
+
+    return symbols.reduce<Record<string, LineStyle>>((acc, symbol, index) => {
+      acc[symbol] = {
+        color: PRESET_COLORS[index % PRESET_COLORS.length],
+        thickness,
+      };
+      return acc;
+    }, {});
+    },
+    [],
+  );
+
+  const buildHoldingsPayload = useCallback((positions: StockPosition[]) => {
+    return positions.map((position) => ({
+      symbol: position.symbol,
+      shares: position.shares,
+      avgCost: position.costBasis,
+      costBasis: position.costBasis,
+      purchaseDate: position.purchaseDate,
+      referenceDate: position.referenceDate,
+      currentPrice: position.currentPrice,
+      currentValue: position.shares * position.currentPrice,
+      color: position.color,
+      cardColor: position.cardColor,
+      lineThickness: position.lineThickness,
+      fontSize: position.fontSize,
+      lastUpdate: position.lastUpdate,
+      meta: { name: position.name },
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || authLoading) return;
+    const legacyPortfolio = window.localStorage.getItem("priorsystems:live-portfolio");
+    const legacyStyles = window.localStorage.getItem("priorsystems:live-line-styles");
+    const legacySaved = window.localStorage.getItem("priorsystems:saved-portfolios");
+
+    if (!legacyPortfolio && !legacyStyles && !legacySaved) return;
+
+    const migrate = async () => {
+      try {
+        if (legacyStyles) {
+          const parsed = JSON.parse(legacyStyles) as Record<string, LineStyle>;
+          const styles = Object.entries(parsed).map(([symbol, style]) => ({
+            symbol,
+            color: style.color,
+            thickness: style.thickness,
+          }));
+          if (styles.length > 0) {
+            await apiFetch("/line-styles", {
+              method: "POST",
+              body: JSON.stringify({ styles }),
+            });
+          }
+        }
+
+        if (legacyPortfolio) {
+          const parsed = JSON.parse(legacyPortfolio) as PortfolioState;
+          await apiFetch("/portfolios", {
+            method: "POST",
+            body: JSON.stringify({
+              name: CURRENT_PORTFOLIO_NAME,
+              context: CURRENT_CONTEXT,
+              cash: 0,
+              chartConfig: DEFAULT_CHART_CONFIG,
+              lineStyles: legacyStyles ? JSON.parse(legacyStyles) : undefined,
+              holdings: buildHoldingsPayload(parsed.positions || []),
+            }),
+          });
+        }
+
+        if (legacySaved) {
+          const parsed = JSON.parse(legacySaved) as Record<string, any>;
+          for (const [name, entry] of Object.entries(parsed)) {
+            if (!entry?.portfolio) continue;
+            await apiFetch("/portfolios", {
+              method: "POST",
+              body: JSON.stringify({
+                name,
+                context: SAVED_CONTEXT,
+                cash: 0,
+                chartConfig: entry.chartConfig || DEFAULT_CHART_CONFIG,
+                lineStyles: entry.lineStyles || undefined,
+                holdings: buildHoldingsPayload(entry.portfolio.positions || []),
+              }),
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to migrate live prices storage:", error);
+      } finally {
+        window.localStorage.removeItem("priorsystems:live-portfolio");
+        window.localStorage.removeItem("priorsystems:live-line-styles");
+        window.localStorage.removeItem("priorsystems:saved-portfolios");
+      }
+    };
+
+    migrate();
+  }, [authLoading, buildHoldingsPayload]);
 
   const ITEMS_PER_PAGE = 8; // 2 rows x 4 columns
   const totalPages = Math.ceil(portfolio.positions.length / ITEMS_PER_PAGE);
@@ -108,43 +235,174 @@ export default function LivePricesPage() {
     (currentPage + 1) * ITEMS_PER_PAGE
   );
 
-  // Load portfolio from localStorage on mount
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved);
-        setPortfolio(data);
+    let cancelled = false;
+    const loadState = async () => {
+      try {
+        const [currentRes, stylesRes, savedRes] = await Promise.all([
+          apiFetch(`/portfolios?context=${CURRENT_CONTEXT}`),
+          apiFetch("/line-styles"),
+          apiFetch(`/portfolios?context=${SAVED_CONTEXT}`),
+        ]);
+
+        if (cancelled) return;
+
+        // Parse responses with error handling
+        const currentData = currentRes.ok ? await currentRes.json() : { portfolios: [] };
+        const stylesData = stylesRes.ok ? await stylesRes.json() : { styles: [] };
+        const savedData = savedRes.ok ? await savedRes.json() : { portfolios: [] };
+
+        if (cancelled) return;
+
+        const styleMap = (stylesData?.styles || []).reduce((acc: Record<string, LineStyle>, style: any) => {
+          acc[style.symbol] = { color: style.color, thickness: style.thickness };
+          return acc;
+        }, {});
+        if (stylesData?.styles) {
+          setLineStyles(styleMap);
+        }
+
+        const currentPortfolio = currentData.portfolios?.[0];
+        if (currentPortfolio) {
+          setCurrentPortfolioId(currentPortfolio.id);
+          setChartConfig(currentPortfolio.chartConfig || DEFAULT_CHART_CONFIG);
+          const positions = (currentPortfolio.holdings || []).map((holding: any, index: number) => {
+            const metaName = holding.meta?.name;
+            const baseColor = styleMap[holding.symbol]?.color || PRESET_COLORS[index % PRESET_COLORS.length];
+            return {
+              id: String(holding.id ?? `${holding.symbol}-${index}`),
+              symbol: holding.symbol,
+              name: metaName || holding.symbol,
+              shares: holding.shares,
+              costBasis: holding.costBasis ?? holding.avgCost ?? 0,
+              purchaseDate: holding.purchaseDate ?? Date.now(),
+              referenceDate: holding.referenceDate ?? holding.purchaseDate ?? Date.now(),
+              currentPrice: holding.currentPrice ?? holding.avgCost ?? 0,
+              change: 0,
+              changePercent: 0,
+              color: holding.color || baseColor,
+              cardColor: holding.cardColor || `${baseColor}20`,
+              lineThickness: holding.lineThickness ?? DEFAULT_CHART_CONFIG.lineThickness,
+              fontSize: holding.fontSize ?? 100,
+              lastUpdate: holding.lastUpdate ?? Date.now(),
+              historicalData: holding.meta?.historicalData || [],
+            };
+          });
+          const totalValue = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
+          const totalCost = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
+          const totalGainLoss = totalValue - totalCost;
+          const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
+          setPortfolio({
+            positions,
+            totalValue,
+            totalCost,
+            totalGainLoss,
+            totalGainLossPercent,
+          });
+        }
+
+        if (Array.isArray(savedData?.portfolios)) {
+          const list = savedData.portfolios.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            savedAt: new Date(p.updatedAt || p.createdAt).getTime(),
+            positionCount: (p.holdings || []).length,
+            payload: p,
+          }));
+          setSavedPortfolios(list);
+        }
+      } catch (error) {
+        console.error("Failed to load portfolio:", error);
       }
-    } catch (error) {
-      console.error("Failed to load portfolio:", error);
+    };
+    if (!authLoading) {
+      loadState();
     }
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading]);
 
-  // Save portfolio to localStorage whenever it changes
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (portfolio.positions.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio));
+    if (portfolio.positions.length === 0) return;
+    setLineStyles((prev) => {
+      const defaults = buildDefaultLineStyles(portfolio.positions, chartConfig.lineThickness);
+      let updated = false;
+      const next = { ...prev };
+
+      Object.entries(defaults).forEach(([symbol, style]) => {
+        if (!next[symbol]) {
+          next[symbol] = style;
+          updated = true;
+        }
+      });
+
+      return updated ? next : prev;
+    });
+  }, [portfolio.positions, chartConfig.lineThickness, buildDefaultLineStyles]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
     }
-  }, [portfolio]);
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        const payload = {
+          id: currentPortfolioId ?? undefined,
+          name: CURRENT_PORTFOLIO_NAME,
+          context: CURRENT_CONTEXT,
+          cash: 0,
+          chartConfig,
+          lineStyles,
+          holdings: buildHoldingsPayload(portfolio.positions),
+        };
+        const res = await apiFetch("/portfolios", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const saved = await res.json();
+          if (!currentPortfolioId && saved?.id) {
+            setCurrentPortfolioId(saved.id);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to persist live portfolio:", error);
+      }
+    }, 800);
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [authLoading, portfolio.positions, chartConfig, lineStyles, currentPortfolioId, buildHoldingsPayload]);
 
-  // Auto-refresh every 5 minutes
   useEffect(() => {
-    const interval = setInterval(() => {
-      refreshPrices();
-    }, 5 * 60 * 1000); // 5 minutes
-
-    return () => clearInterval(interval);
-  }, [portfolio.positions]);
-
-  // Auto-refresh when time range changes
-  useEffect(() => {
-    if (portfolio.positions.length > 0) {
-      refreshPrices();
+    if (authLoading) return;
+    if (lineStyleTimeoutRef.current) {
+      window.clearTimeout(lineStyleTimeoutRef.current);
     }
-  }, [timeRange]);
+    lineStyleTimeoutRef.current = window.setTimeout(() => {
+      const styles = Object.entries(lineStyles).map(([symbol, style]) => ({
+        symbol,
+        color: style.color,
+        thickness: style.thickness,
+      }));
+      if (styles.length === 0) return;
+      apiFetch("/line-styles", {
+        method: "POST",
+        body: JSON.stringify({ styles }),
+      }).catch((error) => {
+        console.error("Failed to persist line styles:", error);
+      });
+    }, 800);
+    return () => {
+      if (lineStyleTimeoutRef.current) {
+        window.clearTimeout(lineStyleTimeoutRef.current);
+      }
+    };
+  }, [authLoading, lineStyles]);
 
   // Refresh stock prices
   const refreshPrices = useCallback(async () => {
@@ -154,7 +412,7 @@ export default function LivePricesPage() {
     try {
       // Fetch latest prices for all positions
       const symbols = portfolio.positions.map((p) => p.symbol);
-      const response = await fetch(`${API_BASE}/api/stock-prices`, {
+      const response = await apiFetch("/api/stock-prices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols, range: timeRange }),
@@ -211,11 +469,27 @@ export default function LivePricesPage() {
     }
   }, [portfolio.positions, timeRange]);
 
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshPrices();
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [refreshPrices]);
+
+  // Auto-refresh when time range changes
+  useEffect(() => {
+    if (portfolio.positions.length > 0) {
+      refreshPrices();
+    }
+  }, [timeRange, portfolio.positions.length, refreshPrices]);
+
   // Add new stock position
-  const addPosition = useCallback(async (symbol: string, shares: number, currentValue: number, purchaseDate: number) => {
+  const addPosition = useCallback(async (symbol: string, shares: number, purchaseDate: number, purchasePrice: number) => {
     try {
       // Fetch current stock data
-      const response = await fetch(`${API_BASE}/api/stock-prices`, {
+      const response = await apiFetch("/api/stock-prices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols: [symbol], range: timeRange }),
@@ -228,12 +502,14 @@ export default function LivePricesPage() {
 
       if (!stockData) throw new Error("Stock not found");
 
-      const colorIndex = portfolio.positions.length % PRESET_COLORS.length;
+      const symbolKey = symbol.toUpperCase();
+      const existingLineStyle = lineStyles[symbolKey];
+      const fallbackColor = PRESET_COLORS[Object.keys(lineStyles).length % PRESET_COLORS.length];
+      const assignedColor = existingLineStyle?.color || fallbackColor;
+      const assignedThickness = existingLineStyle?.thickness || chartConfig.lineThickness;
 
-      // Calculate cost basis from current value
-      // Current value = shares * current price
-      // Cost basis per share = current value / shares
-      const costBasis = currentValue / shares;
+      // Cost basis per share derived from purchase date price
+      const costBasis = purchasePrice;
 
       // Generate unique ID for this position
       const positionId = `${symbol.toUpperCase()}-${purchaseDate}-${Date.now()}`;
@@ -249,13 +525,24 @@ export default function LivePricesPage() {
         currentPrice: stockData.current_price,
         change: stockData.current_price - stockData.previous_close,
         changePercent: ((stockData.current_price - stockData.previous_close) / stockData.previous_close) * 100,
-        color: PRESET_COLORS[colorIndex],
-        cardColor: PRESET_COLORS[colorIndex] + "20",
-        lineThickness: 2,
+        color: assignedColor,
+        cardColor: assignedColor + "20",
+        lineThickness: assignedThickness,
         fontSize: 100,
         lastUpdate: Date.now(),
         historicalData: stockData.historical,
       };
+
+      setLineStyles((prev) => {
+        if (prev[symbolKey]) return prev;
+        return {
+          ...prev,
+          [symbolKey]: {
+            color: assignedColor,
+            thickness: assignedThickness,
+          },
+        };
+      });
 
       const updatedPositions = [...portfolio.positions, newPosition];
       const totalValue = updatedPositions.reduce((sum, p) => sum + p.shares * p.currentPrice, 0);
@@ -275,7 +562,7 @@ export default function LivePricesPage() {
       console.error("Failed to add position:", error);
       alert("Failed to add stock. Please try again.");
     }
-  }, [portfolio.positions, timeRange]);
+  }, [portfolio.positions, timeRange, lineStyles, chartConfig.lineThickness]);
 
   // Remove position by ID (allows removing specific positions of same stock)
   const removePosition = useCallback((positionId: string) => {
@@ -293,135 +580,200 @@ export default function LivePricesPage() {
     });
   }, [portfolio]);
 
-  // Update position color
-  const updatePositionColor = useCallback((symbol: string, color: string) => {
+  const updateLineColor = useCallback((symbol: string, color: string) => {
+    setLineStyles((prev) => ({
+      ...prev,
+      [symbol]: {
+        color,
+        thickness: prev[symbol]?.thickness || chartConfig.lineThickness,
+      },
+    }));
+  }, [chartConfig.lineThickness]);
+
+  const updateLineThickness = useCallback((symbol: string, thickness: number) => {
+    setLineStyles((prev) => ({
+      ...prev,
+      [symbol]: {
+        color: prev[symbol]?.color || PRESET_COLORS[0],
+        thickness,
+      },
+    }));
+  }, []);
+
+  const updatePositionCardColor = useCallback((positionId: string, cardColor: string) => {
     setPortfolio((prev) => ({
       ...prev,
       positions: prev.positions.map((p) =>
-        p.symbol === symbol ? { ...p, color } : p
+        p.id === positionId ? { ...p, cardColor } : p
       ),
     }));
   }, []);
 
-  // Update position card color
-  const updatePositionCardColor = useCallback((symbol: string, cardColor: string) => {
+  const updatePositionFontSize = useCallback((positionId: string, fontSize: number) => {
     setPortfolio((prev) => ({
       ...prev,
       positions: prev.positions.map((p) =>
-        p.symbol === symbol ? { ...p, cardColor } : p
+        p.id === positionId ? { ...p, fontSize } : p
       ),
     }));
   }, []);
 
-  // Update position line thickness
-  const updatePositionLineThickness = useCallback((symbol: string, thickness: number) => {
+  const updatePositionReferenceDate = useCallback((positionId: string, referenceDate: number) => {
     setPortfolio((prev) => ({
       ...prev,
       positions: prev.positions.map((p) =>
-        p.symbol === symbol ? { ...p, lineThickness: thickness } : p
+        p.id === positionId ? { ...p, referenceDate } : p
       ),
     }));
   }, []);
 
-  // Update position font size
-  const updatePositionFontSize = useCallback((symbol: string, fontSize: number) => {
-    setPortfolio((prev) => ({
-      ...prev,
-      positions: prev.positions.map((p) =>
-        p.symbol === symbol ? { ...p, fontSize } : p
-      ),
-    }));
+  const resetChartConfig = useCallback(() => {
+    setChartConfig({ ...DEFAULT_CHART_CONFIG });
   }, []);
 
-  // Update position reference date
-  const updatePositionReferenceDate = useCallback((symbol: string, referenceDate: number) => {
-    setPortfolio((prev) => ({
-      ...prev,
-      positions: prev.positions.map((p) =>
-        p.symbol === symbol ? { ...p, referenceDate } : p
-      ),
-    }));
+  const resetCardCustomization = useCallback(
+    (positionId: string) => {
+      setPortfolio((prev) => {
+        const target = prev.positions.find((position) => position.id === positionId);
+        if (!target) return prev;
+        const lineColor = lineStyles[target.symbol]?.color || PRESET_COLORS[0];
+        return {
+          ...prev,
+          positions: prev.positions.map((position) =>
+            position.id === positionId
+              ? {
+                  ...position,
+                  cardColor: `${lineColor}20`,
+                  fontSize: 100,
+                  referenceDate: position.purchaseDate,
+                }
+              : position,
+          ),
+        };
+      });
+    },
+    [lineStyles],
+  );
+
+  const refreshSavedPortfolios = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/portfolios?context=${SAVED_CONTEXT}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = (data.portfolios || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        savedAt: new Date(p.updatedAt || p.createdAt).getTime(),
+        positionCount: (p.holdings || []).length,
+        payload: p,
+      }));
+      setSavedPortfolios(list);
+    } catch (error) {
+      console.error("Failed to refresh portfolios:", error);
+    }
   }, []);
 
   // Save portfolio with a custom name
-  const savePortfolio = useCallback((name: string) => {
-    if (!name.trim()) return;
-
-    try {
-      const savedPortfoliosJson = localStorage.getItem(SAVED_PORTFOLIOS_KEY);
-      const savedPortfolios = savedPortfoliosJson ? JSON.parse(savedPortfoliosJson) : {};
-
-      savedPortfolios[name] = {
-        portfolio,
-        chartConfig,
-        savedAt: Date.now(),
-      };
-
-      localStorage.setItem(SAVED_PORTFOLIOS_KEY, JSON.stringify(savedPortfolios));
-      setShowSaveDialog(false);
-      alert(`Portfolio "${name}" saved successfully!`);
-    } catch (error) {
-      console.error("Failed to save portfolio:", error);
-      alert("Failed to save portfolio. Please try again.");
-    }
-  }, [portfolio, chartConfig]);
+  const savePortfolio = useCallback(
+    async (name: string) => {
+      if (!name.trim()) return;
+      try {
+        const res = await apiFetch("/portfolios", {
+          method: "POST",
+          body: JSON.stringify({
+            name: name.trim(),
+            context: SAVED_CONTEXT,
+            cash: 0,
+            chartConfig,
+            lineStyles,
+            holdings: buildHoldingsPayload(portfolio.positions),
+          }),
+        });
+        if (!res.ok) {
+          const msg = await res.text();
+          throw new Error(msg || "Failed to save portfolio");
+        }
+        await refreshSavedPortfolios();
+        setShowSaveDialog(false);
+        alert(`Portfolio "${name}" saved successfully!`);
+      } catch (error) {
+        console.error("Failed to save portfolio:", error);
+        alert("Failed to save portfolio. Please try again.");
+      }
+    },
+    [portfolio.positions, chartConfig, lineStyles, buildHoldingsPayload, refreshSavedPortfolios],
+  );
 
   // Load a saved portfolio by name
-  const loadPortfolio = useCallback((name: string) => {
-    try {
-      const savedPortfoliosJson = localStorage.getItem(SAVED_PORTFOLIOS_KEY);
-      if (!savedPortfoliosJson) return;
-
-      const savedPortfolios = JSON.parse(savedPortfoliosJson);
-      const saved = savedPortfolios[name];
-
+  const loadPortfolio = useCallback(
+    (name: string) => {
+      const saved = savedPortfolios.find((p) => p.name === name)?.payload;
       if (!saved) {
         alert(`Portfolio "${name}" not found.`);
         return;
       }
 
-      setPortfolio(saved.portfolio);
-      setChartConfig(saved.chartConfig);
+      const positions = (saved.holdings || []).map((holding: any, index: number) => {
+        const metaName = holding.meta?.name;
+        const baseColor = lineStyles[holding.symbol]?.color || PRESET_COLORS[index % PRESET_COLORS.length];
+        return {
+          id: String(holding.id ?? `${holding.symbol}-${index}`),
+          symbol: holding.symbol,
+          name: metaName || holding.symbol,
+          shares: holding.shares,
+          costBasis: holding.costBasis ?? holding.avgCost ?? 0,
+          purchaseDate: holding.purchaseDate ?? Date.now(),
+          referenceDate: holding.referenceDate ?? holding.purchaseDate ?? Date.now(),
+          currentPrice: holding.currentPrice ?? holding.avgCost ?? 0,
+          change: 0,
+          changePercent: 0,
+          color: holding.color || baseColor,
+          cardColor: holding.cardColor || `${baseColor}20`,
+          lineThickness: holding.lineThickness ?? DEFAULT_CHART_CONFIG.lineThickness,
+          fontSize: holding.fontSize ?? 100,
+          lastUpdate: holding.lastUpdate ?? Date.now(),
+          historicalData: holding.meta?.historicalData || [],
+        };
+      });
+
+      const totalValue = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.currentPrice, 0);
+      const totalCost = positions.reduce((sum: number, p: StockPosition) => sum + p.shares * p.costBasis, 0);
+      const totalGainLoss = totalValue - totalCost;
+      const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
+
+      setPortfolio({
+        positions,
+        totalValue,
+        totalCost,
+        totalGainLoss,
+        totalGainLossPercent,
+      });
+      setChartConfig(saved.chartConfig || DEFAULT_CHART_CONFIG);
+      if (saved.lineStyles) {
+        setLineStyles(saved.lineStyles);
+      }
       setShowLoadDialog(false);
       alert(`Portfolio "${name}" loaded successfully!`);
-    } catch (error) {
-      console.error("Failed to load portfolio:", error);
-      alert("Failed to load portfolio. Please try again.");
-    }
-  }, []);
+    },
+    [savedPortfolios, lineStyles],
+  );
 
   // Delete a saved portfolio
-  const deleteSavedPortfolio = useCallback((name: string) => {
-    try {
-      const savedPortfoliosJson = localStorage.getItem(SAVED_PORTFOLIOS_KEY);
-      if (!savedPortfoliosJson) return;
-
-      const savedPortfolios = JSON.parse(savedPortfoliosJson);
-      delete savedPortfolios[name];
-
-      localStorage.setItem(SAVED_PORTFOLIOS_KEY, JSON.stringify(savedPortfolios));
-    } catch (error) {
-      console.error("Failed to delete portfolio:", error);
-    }
-  }, []);
+  const deleteSavedPortfolio = useCallback(
+    (name: string) => {
+      const target = savedPortfolios.find((p) => p.name === name);
+      if (!target) return;
+      apiFetch(`/portfolios/${target.id}`, { method: "DELETE" })
+        .then(() => refreshSavedPortfolios())
+        .catch((error) => {
+          console.error("Failed to delete portfolio:", error);
+        });
+    },
+    [savedPortfolios, refreshSavedPortfolios],
+  );
 
   // Get list of saved portfolios
-  const getSavedPortfolios = useCallback(() => {
-    try {
-      const savedPortfoliosJson = localStorage.getItem(SAVED_PORTFOLIOS_KEY);
-      if (!savedPortfoliosJson) return [];
-
-      const savedPortfolios = JSON.parse(savedPortfoliosJson);
-      return Object.keys(savedPortfolios).map(name => ({
-        name,
-        savedAt: savedPortfolios[name].savedAt,
-        positionCount: savedPortfolios[name].portfolio.positions.length,
-      }));
-    } catch (error) {
-      console.error("Failed to get saved portfolios:", error);
-      return [];
-    }
-  }, []);
+  const getSavedPortfolios = useCallback(() => savedPortfolios, [savedPortfolios]);
 
   // Format time since last update
   const getTimeSinceRefresh = () => {
@@ -437,11 +789,14 @@ export default function LivePricesPage() {
     return `${diffHours} hours ago`;
   };
 
+  // Wait for auth to load
+  if (authLoading) return null;
+
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
       {/* Header */}
       <header className="border-b border-gray-800 bg-gray-950">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-[1800px] mx-auto px-10 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
               href="/dashboard"
@@ -458,6 +813,7 @@ export default function LivePricesPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {user && <UserDisplay email={user.email} />}
             <div className="text-sm text-gray-400">
               Last updated: {getTimeSinceRefresh()}
             </div>
@@ -525,7 +881,7 @@ export default function LivePricesPage() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-[1800px] mx-auto px-10 py-8">
         {/* Portfolio Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
@@ -603,8 +959,9 @@ export default function LivePricesPage() {
                   <StockCard
                     key={position.id}
                     position={position}
+                    lineColor={lineStyles[position.symbol]?.color || position.color || PRESET_COLORS[0]}
                     onRemove={removePosition}
-                    onColorChange={updatePositionColor}
+                    onLineColorChange={updateLineColor}
                   />
                 ))}
               </div>
@@ -646,13 +1003,13 @@ export default function LivePricesPage() {
           <section>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">
-                {chartView === "portfolio" ? "Portfolio Value" : "Lifetime Earnings"}
+                {chartView === "portfolio" ? "Market Prices" : "Portfolio Value"}
               </h2>
 
               <div className="flex items-center gap-3">
                 {/* Time Range Selector */}
                 <div className="flex rounded-lg border border-gray-800 bg-gray-900/50 overflow-hidden">
-                  {(["1D", "1W", "1M", "3M", "6M", "1Y", "ALL"] as TimeRange[]).map((range) => (
+                  {(["1D", "1W", "1M", "3M", "6M", "1Y", "2Y", "3Y", "ALL"] as TimeRange[]).map((range) => (
                     <button
                       key={range}
                       onClick={() => setTimeRange(range)}
@@ -686,6 +1043,7 @@ export default function LivePricesPage() {
                 chartView={chartView}
                 timeRange={timeRange}
                 config={chartConfig}
+                lineStyles={lineStyles}
               />
             </div>
           </section>
@@ -725,8 +1083,12 @@ export default function LivePricesPage() {
           onConfigChange={setChartConfig}
           onClose={() => setShowCustomization(false)}
           portfolio={portfolio}
+          lineStyles={lineStyles}
+          onResetChartConfig={resetChartConfig}
+          onResetCard={resetCardCustomization}
+          onUpdateLineColor={updateLineColor}
           onUpdateCardColor={updatePositionCardColor}
-          onUpdateLineThickness={updatePositionLineThickness}
+          onUpdateLineThickness={updateLineThickness}
           onUpdateFontSize={updatePositionFontSize}
           onUpdateReferenceDate={updatePositionReferenceDate}
         />
@@ -739,11 +1101,12 @@ export default function LivePricesPage() {
 
 interface StockCardProps {
   position: StockPosition;
+  lineColor: string;
   onRemove: (positionId: string) => void;
-  onColorChange: (symbol: string, color: string) => void;
+  onLineColorChange: (symbol: string, color: string) => void;
 }
 
-function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
+function StockCard({ position, lineColor, onRemove, onLineColorChange }: StockCardProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
 
   const positionValue = position.shares * position.currentPrice;
@@ -773,7 +1136,7 @@ function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
     <div
       className="rounded-xl border p-4 relative transition-all"
       style={{
-        borderColor: position.color + "40",
+        borderColor: lineColor + "40",
         backgroundColor: position.cardColor,
         fontSize: `${fontSizeScale}rem`
       }}
@@ -783,7 +1146,7 @@ function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
         <div className="flex items-center gap-2">
           <div
             className="w-3 h-3 rounded-full cursor-pointer"
-            style={{ backgroundColor: position.color }}
+            style={{ backgroundColor: lineColor }}
             onClick={() => setShowColorPicker(!showColorPicker)}
           />
           <div>
@@ -810,7 +1173,7 @@ function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
               <button
                 key={color}
                 onClick={() => {
-                  onColorChange(position.symbol, color);
+                  onLineColorChange(position.symbol, color);
                   setShowColorPicker(false);
                 }}
                 className="w-8 h-8 rounded-full border-2 border-transparent hover:border-white transition"
@@ -840,7 +1203,7 @@ function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
         <svg width="100%" height="50" className="overflow-visible">
           <polyline
             fill="none"
-            stroke={position.color}
+            stroke={lineColor}
             strokeWidth="2"
             points={sparklineData
               .map((price, idx) => {
@@ -853,8 +1216,8 @@ function StockCard({ position, onRemove, onColorChange }: StockCardProps) {
           {/* Add subtle fill under the line */}
           <defs>
             <linearGradient id={`gradient-${position.symbol}`} x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" style={{ stopColor: position.color, stopOpacity: 0.3 }} />
-              <stop offset="100%" style={{ stopColor: position.color, stopOpacity: 0 }} />
+              <stop offset="0%" style={{ stopColor: lineColor, stopOpacity: 0.3 }} />
+              <stop offset="100%" style={{ stopColor: lineColor, stopOpacity: 0 }} />
             </linearGradient>
           </defs>
           <polygon
@@ -903,38 +1266,59 @@ interface PortfolioChartProps {
   chartView: ChartView;
   timeRange: TimeRange;
   config: ChartConfig;
+  lineStyles: Record<string, LineStyle>;
 }
 
-function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioChartProps) {
+function PortfolioChart({ portfolio, chartView, timeRange, config, lineStyles }: PortfolioChartProps) {
+  const positionsBySymbol = React.useMemo(() => {
+    const grouped = new Map<string, StockPosition[]>();
+    portfolio.positions.forEach((position) => {
+      if (!grouped.has(position.symbol)) {
+        grouped.set(position.symbol, []);
+      }
+      grouped.get(position.symbol)!.push(position);
+    });
+    return grouped;
+  }, [portfolio.positions]);
+
+  const getLineStyle = React.useCallback(
+    (symbol: string) =>
+      lineStyles[symbol] || {
+        color: PRESET_COLORS[0],
+        thickness: config.lineThickness,
+      },
+    [lineStyles, config.lineThickness],
+  );
+
+  const getHeldSharesAt = React.useCallback(
+    (symbol: string, timestamp: number) => {
+      const positions = positionsBySymbol.get(symbol) || [];
+      return positions.reduce((sum, position) => {
+        if (position.purchaseDate <= timestamp) {
+          return sum + position.shares;
+        }
+        return sum;
+      }, 0);
+    },
+    [positionsBySymbol],
+  );
+
   // Build chart data based on view
   const getChartData = () => {
     if (chartView === "portfolio") {
-      // Group positions by symbol and aggregate shares
-      const groupedBySymbol = new Map<string, StockPosition[]>();
-      portfolio.positions.forEach((position) => {
-        if (!groupedBySymbol.has(position.symbol)) {
-          groupedBySymbol.set(position.symbol, []);
-        }
-        groupedBySymbol.get(position.symbol)!.push(position);
-      });
-
       // Create one dataset per unique symbol
-      const datasets = Array.from(groupedBySymbol.entries()).map(([symbol, positions]) => {
-        // Use the first position's styling
+      const datasets = Array.from(positionsBySymbol.entries()).map(([symbol, positions]) => {
         const firstPosition = positions[0];
-
-        // Calculate total shares across all positions of this symbol
-        const totalShares = positions.reduce((sum, p) => sum + p.shares, 0);
-
+        const lineStyle = getLineStyle(symbol);
         return {
           label: symbol,
           data: firstPosition.historicalData.map((d) => ({
             x: d.timestamp,
-            y: d.price * totalShares,
+            y: d.price,
           })),
-          borderColor: firstPosition.color,
-          backgroundColor: firstPosition.color + "20",
-          borderWidth: firstPosition.lineThickness,
+          borderColor: lineStyle.color,
+          backgroundColor: lineStyle.color + "20",
+          borderWidth: lineStyle.thickness,
           pointRadius: 0,
           pointHoverRadius: 4,
           fill: false,
@@ -946,40 +1330,60 @@ function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioCh
 
       return { datasets };
     } else {
-      // Single line showing total portfolio value over time
-      // Aggregate all positions' historical data
       const allTimestamps = new Set<number>();
-      portfolio.positions.forEach((position) => {
-        position.historicalData.forEach((d) => allTimestamps.add(d.timestamp));
+      positionsBySymbol.forEach((positions) => {
+        positions[0].historicalData.forEach((d) => allTimestamps.add(d.timestamp));
       });
 
-      const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+      const earliestPurchaseDate = Math.min(
+        ...portfolio.positions.map((position) => position.purchaseDate),
+      );
+      const sortedTimestamps = Array.from(allTimestamps)
+        .sort((a, b) => a - b)
+        .filter((timestamp) => timestamp >= earliestPurchaseDate);
 
-      const portfolioValues = sortedTimestamps.map((timestamp) => {
-        const value = portfolio.positions.reduce((sum, position) => {
-          const dataPoint = position.historicalData.find((d) => d.timestamp === timestamp);
-          if (dataPoint) {
-            return sum + dataPoint.price * position.shares;
+      const priceSeriesBySymbol = new Map(
+        Array.from(positionsBySymbol.entries()).map(([symbol, positions]) => [
+          symbol,
+          positions[0].historicalData,
+        ]),
+      );
+
+      const seriesPointers = new Map<string, number>();
+      const lastPrices = new Map<string, number>();
+      priceSeriesBySymbol.forEach((_, symbol) => {
+        seriesPointers.set(symbol, 0);
+      });
+
+      const totalValueData = sortedTimestamps.map((timestamp) => {
+        let totalValue = 0;
+        priceSeriesBySymbol.forEach((series, symbol) => {
+          let pointer = seriesPointers.get(symbol) ?? 0;
+          while (pointer < series.length && series[pointer].timestamp <= timestamp) {
+            lastPrices.set(symbol, series[pointer].price);
+            pointer += 1;
           }
-          return sum;
-        }, 0);
+          seriesPointers.set(symbol, pointer);
 
-        return { x: timestamp, y: value };
+          const price = lastPrices.get(symbol);
+          if (price === undefined) {
+            return;
+          }
+          const sharesHeld = getHeldSharesAt(symbol, timestamp);
+          if (sharesHeld > 0) {
+            totalValue += price * sharesHeld;
+          }
+        });
+        return { x: timestamp, y: totalValue };
       });
-
-      // Calculate earnings (value - cost)
-      const earningsData = portfolioValues.map((point) => ({
-        x: point.x,
-        y: point.y - portfolio.totalCost,
-      }));
 
       return {
         datasets: [
           {
-            label: "Lifetime Earnings",
-            data: earningsData,
-            borderColor: earningsData[earningsData.length - 1]?.y >= 0 ? "#34d399" : "#f87171",
-            backgroundColor: (earningsData[earningsData.length - 1]?.y >= 0 ? "#34d399" : "#f87171") + "20",
+            label: "Total Value",
+            data: totalValueData,
+            borderColor: "#38bdf8",
+            backgroundColor: "#38bdf8" + "20",
             borderWidth: config.lineThickness,
             pointRadius: 0,
             pointHoverRadius: 4,
@@ -1070,12 +1474,51 @@ function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioCh
         borderColor: "#374151",
         borderWidth: 1,
         padding: 12,
+        bodySpacing: 6,
+        titleMarginBottom: 8,
+        caretPadding: 6,
+        boxPadding: 4,
         displayColors: true,
         callbacks: {
+          title: (items: any[]) => {
+            if (!items.length) return "";
+            const date = new Date(items[0].parsed.x).toLocaleDateString();
+            if (chartView !== "portfolio") {
+              return `Total Value • ${date}`;
+            }
+            const uniqueSymbols = Array.from(
+              new Set(items.map((item) => item.dataset.label).filter(Boolean)),
+            );
+            const maxNames = 4;
+            const displaySymbols =
+              uniqueSymbols.length > maxNames
+                ? [...uniqueSymbols.slice(0, maxNames), `+${uniqueSymbols.length - maxNames} more`]
+                : uniqueSymbols;
+            return `${displaySymbols.join(", ")} • ${date}`;
+          },
           label: (context: any) => {
-            const label = context.dataset.label || "";
-            const value = context.parsed.y;
-            return `${label}: $${value.toFixed(2)}`;
+            const price = context.parsed.y;
+            if (chartView !== "portfolio") {
+              return [
+                `Total Value: $${price.toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })}`,
+              ];
+            }
+            const lines = [`Price: $${price.toFixed(2)}`];
+            if (chartView === "portfolio") {
+              const symbol = context.dataset.label || "";
+              const sharesHeld = getHeldSharesAt(symbol, context.parsed.x);
+              if (sharesHeld > 0) {
+                const contribution = price * sharesHeld;
+                lines.push(
+                  `Contribution: $${contribution.toLocaleString(undefined, {
+                    maximumFractionDigits: 2,
+                  })} (${sharesHeld.toLocaleString()} shares)`,
+                );
+              }
+            }
+            return lines;
           },
         },
       },
@@ -1102,7 +1545,7 @@ function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioCh
       y: {
         title: {
           display: true,
-          text: 'Price (USD)',
+          text: chartView === "portfolio" ? "Price (USD)" : "Total Value (USD)",
           color: config.axisColor,
           font: {
             size: 12,
@@ -1115,7 +1558,10 @@ function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioCh
         },
         ticks: {
           color: config.axisColor,
-          callback: (value: any) => value.toFixed(0), // Remove $ sign
+          callback: (value: any) =>
+            chartView === "portfolio"
+              ? value.toFixed(0)
+              : `$${Number(value).toLocaleString()}`,
         },
       },
     },
@@ -1136,22 +1582,97 @@ function PortfolioChart({ portfolio, chartView, timeRange, config }: PortfolioCh
 
 interface AddStockDialogProps {
   onClose: () => void;
-  onAdd: (symbol: string, shares: number, currentValue: number, purchaseDate: number) => void;
+  onAdd: (symbol: string, shares: number, purchaseDate: number, purchasePrice: number) => void;
 }
 
 function AddStockDialog({ onClose, onAdd }: AddStockDialogProps) {
   const [symbol, setSymbol] = useState("");
   const [shares, setShares] = useState("");
-  const [currentValue, setCurrentValue] = useState("");
   const [purchaseDate, setPurchaseDate] = useState("");
+  const [purchasePrice, setPurchasePrice] = useState<number | null>(null);
+  const [priceLabel, setPriceLabel] = useState<string>("");
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const trimmedSymbol = symbol.trim().toUpperCase();
+    if (!trimmedSymbol || !purchaseDate) {
+      setPurchasePrice(null);
+      setPriceLabel("");
+      setPriceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsFetchingPrice(true);
+    setPriceError(null);
+
+    const loadPrice = async () => {
+      try {
+        const response = await apiFetch("/api/stock-prices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: [trimmedSymbol], range: "ALL" }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch price data");
+        }
+
+        const data = await response.json();
+        const stockData = data[trimmedSymbol];
+        if (!stockData || !Array.isArray(stockData.historical) || stockData.historical.length === 0) {
+          throw new Error("No historical data found");
+        }
+
+        const targetTimestamp = new Date(purchaseDate).getTime();
+        let closest = stockData.historical[0];
+        let closestDiff = Math.abs(closest.timestamp - targetTimestamp);
+        for (const point of stockData.historical) {
+          const diff = Math.abs(point.timestamp - targetTimestamp);
+          if (diff < closestDiff) {
+            closest = point;
+            closestDiff = diff;
+          }
+        }
+
+        if (!cancelled) {
+          setPurchasePrice(closest.price);
+          setPriceLabel(new Date(closest.timestamp).toISOString().slice(0, 10));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPurchasePrice(null);
+          setPriceLabel("");
+          setPriceError(error instanceof Error ? error.message : "Failed to fetch price");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsFetchingPrice(false);
+        }
+      }
+    };
+
+    loadPrice();
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, purchaseDate]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!symbol || !shares || !currentValue || !purchaseDate) return;
+    const sharesValue = parseFloat(shares);
+    if (!symbol || !purchaseDate || purchasePrice === null || !Number.isFinite(sharesValue) || sharesValue <= 0) {
+      return;
+    }
 
     const purchaseTimestamp = new Date(purchaseDate).getTime();
-    onAdd(symbol.toUpperCase(), parseFloat(shares), parseFloat(currentValue), purchaseTimestamp);
+    onAdd(symbol.toUpperCase(), sharesValue, purchaseTimestamp, purchasePrice);
   };
+
+  const sharesValue = parseFloat(shares);
+  const hasShares = Number.isFinite(sharesValue) && sharesValue > 0;
+  const estimatedValue = purchasePrice !== null && hasShares ? purchasePrice * sharesValue : null;
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
@@ -1185,6 +1706,23 @@ function AddStockDialog({ onClose, onAdd }: AddStockDialogProps) {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
+              Purchase Date
+            </label>
+            <input
+              type="date"
+              value={purchaseDate}
+              onChange={(e) => setPurchaseDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
+              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Used to estimate your purchase price per share.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
               Number of Shares
             </label>
             <input
@@ -1197,45 +1735,31 @@ function AddStockDialog({ onClose, onAdd }: AddStockDialogProps) {
               className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
               required
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Enter the total shares you purchased.
+            </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Current Total Value
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
-              <input
-                type="number"
-                value={currentValue}
-                onChange={(e) => setCurrentValue(e.target.value)}
-                placeholder="15000.00"
-                step="0.01"
-                min="0"
-                className="w-full pl-8 pr-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                required
-              />
+          <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-4">
+            <div className="flex items-center justify-between text-sm text-gray-300">
+              <span>Estimated Position Value</span>
+              {isFetchingPrice ? (
+                <span className="text-xs text-gray-500">Fetching price...</span>
+              ) : (
+                <span className="text-sm font-semibold text-white">
+                  {estimatedValue !== null
+                    ? `$${estimatedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                    : "--"}
+                </span>
+              )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Enter the current value shown in your brokerage app (e.g., Robinhood)
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Purchase Date
-            </label>
-            <input
-              type="date"
-              value={purchaseDate}
-              onChange={(e) => setPurchaseDate(e.target.value)}
-              max={new Date().toISOString().split('T')[0]}
-              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              When did you purchase this stock?
-            </p>
+            <div className="mt-2 text-xs text-gray-500">
+              {priceError
+                ? `Price lookup failed: ${priceError}`
+                : purchasePrice !== null && priceLabel
+                ? `Price on ${priceLabel}: $${purchasePrice.toFixed(2)}`
+                : "Select a date to load the purchase price."}
+            </div>
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -1248,7 +1772,8 @@ function AddStockDialog({ onClose, onAdd }: AddStockDialogProps) {
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
+              disabled={!symbol || !purchaseDate || purchasePrice === null || !hasShares}
+              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add Position
             </button>
@@ -1266,25 +1791,37 @@ interface CustomizationPanelProps {
   onConfigChange: (config: ChartConfig) => void;
   onClose: () => void;
   portfolio: PortfolioState;
-  onUpdateCardColor: (symbol: string, color: string) => void;
+  lineStyles: Record<string, LineStyle>;
+  onResetChartConfig: () => void;
+  onResetCard: (positionId: string) => void;
+  onUpdateLineColor: (symbol: string, color: string) => void;
+  onUpdateCardColor: (positionId: string, color: string) => void;
   onUpdateLineThickness: (symbol: string, thickness: number) => void;
-  onUpdateFontSize: (symbol: string, fontSize: number) => void;
-  onUpdateReferenceDate: (symbol: string, referenceDate: number) => void;
+  onUpdateFontSize: (positionId: string, fontSize: number) => void;
+  onUpdateReferenceDate: (positionId: string, referenceDate: number) => void;
 }
 
-function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpdateCardColor, onUpdateLineThickness, onUpdateFontSize, onUpdateReferenceDate }: CustomizationPanelProps) {
+function CustomizationPanel({ config, onConfigChange, onClose, portfolio, lineStyles, onResetChartConfig, onResetCard, onUpdateLineColor, onUpdateCardColor, onUpdateLineThickness, onUpdateFontSize, onUpdateReferenceDate }: CustomizationPanelProps) {
   return (
     <div className="fixed inset-y-0 right-0 w-80 bg-gray-900 border-l border-gray-800 z-40 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold">Chart Settings</h3>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-white transition"
-        >
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onResetChartConfig}
+            className="rounded-md border border-gray-700 px-2 py-1 text-xs font-semibold text-gray-300 hover:border-gray-500 hover:text-white transition"
+          >
+            Reset Chart
+          </button>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -1364,20 +1901,86 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpda
         {portfolio.positions.length > 0 && (
           <>
             <div className="pt-6 border-t border-gray-800">
-              <h4 className="text-md font-bold mb-4">Stock Customization</h4>
+              <h4 className="text-md font-bold mb-4">Chart Line Styles</h4>
             </div>
 
-            {portfolio.positions.map((position) => (
-              <div key={position.id} className="pb-6 border-b border-gray-800 last:border-0">
-                <div className="flex items-center gap-2 mb-3">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: position.color }}
-                  />
-                  <span className="font-semibold">{position.symbol}</span>
-                </div>
+            {Array.from(new Set(portfolio.positions.map((position) => position.symbol))).map((symbol) => {
+              const lineStyle = lineStyles[symbol] || {
+                color: PRESET_COLORS[0],
+                thickness: config.lineThickness,
+              };
+              return (
+                <div key={symbol} className="pb-6 border-b border-gray-800 last:border-0">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: lineStyle.color }}
+                    />
+                    <span className="font-semibold">{symbol}</span>
+                  </div>
 
-                <div className="space-y-4">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-400 mb-2">
+                        Line Color
+                      </label>
+                      <input
+                        type="color"
+                        value={lineStyle.color}
+                        onChange={(e) => onUpdateLineColor(symbol, e.target.value)}
+                        className="w-full h-8 rounded border border-gray-700 bg-gray-800 cursor-pointer"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-400 mb-2">
+                        Line Thickness: {lineStyle.thickness}px
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="5"
+                        step="1"
+                        value={lineStyle.thickness}
+                        onChange={(e) => onUpdateLineThickness(symbol, parseInt(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="pt-6 border-t border-gray-800">
+              <h4 className="text-md font-bold mb-4">Card Styling (Batches)</h4>
+            </div>
+
+            {portfolio.positions.map((position) => {
+              const lineColor =
+                lineStyles[position.symbol]?.color || position.color || PRESET_COLORS[0];
+              const purchaseDate = new Date(position.purchaseDate).toISOString().split('T')[0];
+              return (
+                <div key={position.id} className="pb-6 border-b border-gray-800 last:border-0">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: lineColor }}
+                    />
+                    <div className="flex-1">
+                      <div className="font-semibold">{position.symbol}</div>
+                      <div className="text-[10px] text-gray-500">
+                        {purchaseDate} • {position.shares} shares
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onResetCard(position.id)}
+                      className="rounded-md border border-gray-700 px-2 py-1 text-[10px] font-semibold text-gray-300 hover:border-gray-500 hover:text-white transition"
+                    >
+                      Reset Card
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-400 mb-2">
                       Card Background Color
@@ -1385,23 +1988,8 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpda
                     <input
                       type="color"
                       value={position.cardColor.replace(/[0-9a-f]{2}$/i, '')} // Remove alpha
-                      onChange={(e) => onUpdateCardColor(position.symbol, e.target.value + '20')}
+                      onChange={(e) => onUpdateCardColor(position.id, e.target.value + '20')}
                       className="w-full h-8 rounded border border-gray-700 bg-gray-800 cursor-pointer"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-400 mb-2">
-                      Line Thickness: {position.lineThickness}px
-                    </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="5"
-                      step="1"
-                      value={position.lineThickness}
-                      onChange={(e) => onUpdateLineThickness(position.symbol, parseInt(e.target.value))}
-                      className="w-full"
                     />
                   </div>
 
@@ -1415,7 +2003,7 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpda
                       max="150"
                       step="5"
                       value={position.fontSize}
-                      onChange={(e) => onUpdateFontSize(position.symbol, parseInt(e.target.value))}
+                      onChange={(e) => onUpdateFontSize(position.id, parseInt(e.target.value))}
                       className="w-full"
                     />
                   </div>
@@ -1427,7 +2015,7 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpda
                     <input
                       type="date"
                       value={new Date(position.referenceDate).toISOString().split('T')[0]}
-                      onChange={(e) => onUpdateReferenceDate(position.symbol, new Date(e.target.value).getTime())}
+                      onChange={(e) => onUpdateReferenceDate(position.id, new Date(e.target.value).getTime())}
                       max={new Date().toISOString().split('T')[0]}
                       className="w-full px-3 py-2 rounded border border-gray-700 bg-gray-800 text-white text-xs"
                     />
@@ -1437,7 +2025,8 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, onUpda
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </>
         )}
       </div>
@@ -1525,6 +2114,10 @@ interface LoadPortfolioDialogProps {
 
 function LoadPortfolioDialog({ onClose, onLoad, onDelete, getSavedPortfolios }: LoadPortfolioDialogProps) {
   const [savedPortfolios, setSavedPortfolios] = useState(getSavedPortfolios());
+
+  useEffect(() => {
+    setSavedPortfolios(getSavedPortfolios());
+  }, [getSavedPortfolios]);
 
   const handleDelete = (name: string) => {
     if (confirm(`Delete portfolio "${name}"?`)) {

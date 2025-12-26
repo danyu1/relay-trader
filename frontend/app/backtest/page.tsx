@@ -28,6 +28,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { python } from "@codemirror/lang-python";
 import "@/utils/nativeDateAdapter";
 import ManualMode from "./ManualMode";
+import PortfolioMode from "./PortfolioMode";
+import { apiFetch } from "@/app/lib/api";
+import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler, BarElement, BarController);
 
@@ -511,7 +514,7 @@ type DatasetInfo = {
 };
 
 type DataSetProfile = {
-  id: string;
+  id: number;
   datasetName: string;
   displayName: string;
   startIndex: number;
@@ -860,6 +863,63 @@ const PARAM_TOOLTIPS: Record<string, string> = {
 function BacktestPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { loading: authLoading } = useRequireAuth();
+  const FORM_SETTING_KEY = "backtest-form";
+  const PRESET_SETTING_KEY = "strategy-param-presets";
+
+  useEffect(() => {
+    if (typeof window === "undefined" || authLoading) return;
+    const legacyForm = window.localStorage.getItem("priorsystems:backtest-form");
+    const legacyPresets = window.localStorage.getItem("priorsystems:strategy-param-presets");
+    const legacyMode = window.localStorage.getItem("priorsystems:trading-mode");
+
+    const migrate = async () => {
+      try {
+        if (legacyForm) {
+          const parsed = JSON.parse(legacyForm);
+          await apiFetch(`/user-settings/${FORM_SETTING_KEY}`, {
+            method: "PUT",
+            body: JSON.stringify({ key: FORM_SETTING_KEY, value: parsed }),
+          });
+        }
+        if (legacyPresets) {
+          const parsed = JSON.parse(legacyPresets);
+          await apiFetch(`/user-settings/${PRESET_SETTING_KEY}`, {
+            method: "PUT",
+            body: JSON.stringify({ key: PRESET_SETTING_KEY, value: parsed }),
+          });
+        }
+        if (legacyMode) {
+          await apiFetch("/user-settings/trading-mode", {
+            method: "PUT",
+            body: JSON.stringify({ key: "trading-mode", value: legacyMode }),
+          });
+        }
+      } catch (error) {
+        console.error("Failed to migrate backtest settings:", error);
+      } finally {
+        window.localStorage.removeItem("priorsystems:backtest-form");
+        window.localStorage.removeItem("priorsystems:strategy-param-presets");
+        window.localStorage.removeItem("priorsystems:trading-mode");
+        window.localStorage.removeItem("priorsystems:history");
+      }
+    };
+
+    if (legacyForm || legacyPresets || legacyMode) {
+      migrate();
+    }
+  }, [authLoading, FORM_SETTING_KEY, PRESET_SETTING_KEY]);
+
+  if (authLoading) {
+    return null;
+  }
+
+  // Check if portfolio mode is requested
+  const portfolioMode = searchParams.get('mode') === 'portfolio';
+  if (portfolioMode) {
+    return <PortfolioMode />;
+  }
+
   const [strategyCode, setStrategyCode] = useState(DEFAULT_STRATEGY);
   const [symbol, setSymbol] = useState("AAPL");
   const [csvPath, setCsvPath] = useState("");
@@ -989,67 +1049,77 @@ function BacktestPageContent() {
     return () => window.clearTimeout(timer);
   }, [activeRunId]);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
-  const STORAGE_KEY = "priorsystems:backtest-form";
-  const PRESET_STORAGE_KEY = "priorsystems:strategy-param-presets";
-  const DATASET_STORAGE_KEY = "priorsystems:selected-dataset";
-  const PROFILE_STORAGE_KEY = "priorsystems:active-profile";
   const chartIntroClass = ""; // Disabled for performance
   const chartInstanceKey = activeRunId ?? "baseline";
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedDataset = window.localStorage.getItem(DATASET_STORAGE_KEY);
-    const storedProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
-    if (storedProfile) {
+    let cancelled = false;
+    const loadSelection = async () => {
       try {
-        const parsed = JSON.parse(storedProfile) as DataSetProfile;
-        if (
-          parsed?.datasetName &&
-          Number.isFinite(parsed.startIndex) &&
-          Number.isFinite(parsed.endIndex)
-        ) {
-          if (storedDataset && storedDataset !== parsed.datasetName) {
-            throw new Error("Profile dataset does not match selected dataset");
+        const [datasetRes, profileRes, profilesRes] = await Promise.all([
+          apiFetch("/user-settings/selected-dataset"),
+          apiFetch("/user-settings/active-profile-id"),
+          apiFetch("/dataset-profiles"),
+        ]);
+        const datasetData = await datasetRes.json();
+        const profileData = await profileRes.json();
+        const profilesData = await profilesRes.json();
+        if (cancelled) return;
+        const selectedDataset = datasetData?.value as string | null;
+        const activeProfileId =
+          typeof profileData?.value === "number" ? (profileData.value as number) : null;
+        if (activeProfileId && Array.isArray(profilesData?.profiles)) {
+          const profile = profilesData.profiles.find((item: DataSetProfile) => item.id === activeProfileId);
+          if (profile) {
+            setActiveProfile(profile);
+            setLockedDatasetName(profile.datasetName);
+            setStartBar(profile.startIndex);
+            const rangeBars = profile.endIndex - profile.startIndex + 1;
+            if (Number.isFinite(rangeBars) && rangeBars > 0) {
+              setMaxBars(rangeBars);
+            }
+            if (typeof profile.initialEquity === "number" && Number.isFinite(profile.initialEquity)) {
+              setInitialCash(profile.initialEquity);
+            }
+            return;
           }
-          setActiveProfile(parsed);
-          setLockedDatasetName(parsed.datasetName);
-          setStartBar(parsed.startIndex);
-          const rangeBars = parsed.endIndex - parsed.startIndex + 1;
-          if (Number.isFinite(rangeBars) && rangeBars > 0) {
-            setMaxBars(rangeBars);
-          }
-          if (typeof parsed.initialEquity === "number" && Number.isFinite(parsed.initialEquity)) {
-            setInitialCash(parsed.initialEquity);
-          }
+        }
+        if (selectedDataset) {
+          setLockedDatasetName(selectedDataset);
           return;
         }
+        setDatasetLoading(false);
+        setDatasetError("Select a dataset first.");
       } catch {
-        // ignore invalid profile data
+        if (cancelled) return;
+        setDatasetLoading(false);
+        setDatasetError("Select a dataset first.");
       }
-    }
-    if (storedDataset) {
-      setLockedDatasetName(storedDataset);
-    } else {
-      setDatasetLoading(false);
-      setDatasetError("Select a dataset first.");
-    }
-  }, [DATASET_STORAGE_KEY, PROFILE_STORAGE_KEY]);
+    };
+    loadSelection();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load and persist trading mode
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Load on mount
-    const saved = window.localStorage.getItem("priorsystems:trading-mode");
-    if (saved === "manual" || saved === "mechanical") {
-      setTradingMode(saved);
-    }
+    apiFetch("/user-settings/trading-mode")
+      .then((res) => res.json())
+      .then((data) => {
+        const value = data.value;
+        if (value === "manual" || value === "mechanical") {
+          setTradingMode(value);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Save on change
-    window.localStorage.setItem("priorsystems:trading-mode", tradingMode);
+    apiFetch("/user-settings/trading-mode", {
+      method: "PUT",
+      body: JSON.stringify({ key: "trading-mode", value: tradingMode }),
+    }).catch(() => undefined);
   }, [tradingMode]);
 
   useEffect(() => {
@@ -1059,7 +1129,7 @@ function BacktestPageContent() {
       setDatasetLoading(true);
       setDatasetError(null);
       try {
-        const res = await fetch(`${apiBase}/datasets`);
+        const res = await apiFetch("/datasets");
         if (!res.ok) {
           const text = await res.text();
           throw new Error(text || "Failed to fetch datasets");
@@ -1080,7 +1150,7 @@ function BacktestPageContent() {
 
         // Fetch first price from dataset
         try {
-          const previewRes = await fetch(`${apiBase}/dataset-preview?name=${encodeURIComponent(match.name)}&limit=1`);
+          const previewRes = await apiFetch(`/dataset-preview?name=${encodeURIComponent(match.name)}&limit=1`);
           if (previewRes.ok) {
             const previewData = await previewRes.json();
             if (previewData.head && previewData.head.length > 0) {
@@ -1107,12 +1177,23 @@ function BacktestPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, lockedDatasetName]);
+  }, [lockedDatasetName]);
 
-  const loadPortfolioEquity = useCallback(() => {
+  const loadPortfolioEquity = useCallback(async () => {
     try {
-      const stored = localStorage.getItem("portfolio");
-      if (!stored) {
+      const [activeRes, portfoliosRes] = await Promise.all([
+        apiFetch("/user-settings/active-portfolio-id"),
+        apiFetch("/portfolios?context=builder"),
+      ]);
+      const activeSetting = await activeRes.json();
+      const portfolioData = await portfoliosRes.json();
+      const portfolios = portfolioData.portfolios || [];
+      const activeId = typeof activeSetting.value === "number" ? activeSetting.value : null;
+      const portfolio =
+        (activeId ? portfolios.find((p: any) => p.id === activeId) : null) ||
+        portfolios[0];
+
+      if (!portfolio) {
         const confirmNav = confirm("No portfolio found. Would you like to create one now?");
         if (confirmNav) {
           router.push("/portfolio");
@@ -1120,15 +1201,11 @@ function BacktestPageContent() {
         return;
       }
 
-      const portfolio = JSON.parse(stored);
       const holdings = portfolio.holdings || [];
       const cash = portfolio.cash || 0;
-
-      // Calculate total holdings value - use currentValue if available, otherwise calculate from price
       const totalHoldingsValue = holdings.reduce((sum: number, holding: any) => {
         return sum + (holding.currentValue || holding.shares * holding.avgCost);
       }, 0);
-
       const totalEquity = cash + totalHoldingsValue;
 
       setPortfolioEquity(totalEquity);
@@ -1193,60 +1270,52 @@ function BacktestPageContent() {
     [applyBuiltinParamState, builtinList],
   );
 
-  // hydrate from local storage
+  // hydrate from user settings
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
+    const loadForm = async () => {
+      try {
+        const res = await apiFetch(`/user-settings/${FORM_SETTING_KEY}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const saved = data.value;
+        if (!saved || typeof saved !== "object") return;
 
-      // Check if there's an active profile with initialEquity - if so, don't override it
-      const storedProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
-      let hasProfileEquity = false;
-      if (storedProfile) {
-        try {
-          const parsed = JSON.parse(storedProfile);
-          if (typeof parsed.initialEquity === "number" && Number.isFinite(parsed.initialEquity)) {
-            hasProfileEquity = true;
-          }
-        } catch {
-          // ignore
+        const hasProfileEquity =
+          typeof activeProfile?.initialEquity === "number" && Number.isFinite(activeProfile?.initialEquity);
+
+        if (saved.symbol) setSymbol(saved.symbol);
+        if (saved.csvPath) setCsvPath(saved.csvPath);
+        if (typeof saved.initialCash === "number" && !hasProfileEquity) {
+          setInitialCash(saved.initialCash);
         }
+        if (typeof saved.maxBars === "number" || saved.maxBars === null) {
+          setMaxBars(saved.maxBars ?? undefined);
+        }
+        if (typeof saved.commission === "number") setCommission(saved.commission);
+        if (typeof saved.slippageBps === "number") setSlippageBps(saved.slippageBps);
+        if (typeof saved.strategyCode === "string" && saved.strategyCode.length > 0) {
+          setStrategyCode(saved.strategyCode);
+        }
+        if (typeof saved.strategyParamsRaw === "string") {
+          setStrategyParamsRaw(saved.strategyParamsRaw);
+        }
+        if (saved.mode === "builtin" || saved.mode === "custom") {
+          setMode(saved.mode);
+        }
+        if (typeof saved.builtinId === "string") {
+          setBuiltinId(saved.builtinId);
+        }
+        if (saved.mode === "builtin" && saved.builtinParams && typeof saved.builtinParams === "object") {
+          applyBuiltinParamState(saved.builtinParams as NumericParams);
+        } else {
+          applyBuiltinParamState({});
+        }
+      } catch (e) {
+        console.warn("Failed to load saved config", e);
       }
-
-      if (saved.symbol) setSymbol(saved.symbol);
-      if (saved.csvPath) setCsvPath(saved.csvPath);
-      // Only load initialCash from storage if there's no active profile equity
-      if (typeof saved.initialCash === "number" && !hasProfileEquity) {
-        setInitialCash(saved.initialCash);
-      }
-      if (typeof saved.maxBars === "number" || saved.maxBars === null) {
-        setMaxBars(saved.maxBars ?? undefined);
-      }
-      if (typeof saved.commission === "number") setCommission(saved.commission);
-      if (typeof saved.slippageBps === "number") setSlippageBps(saved.slippageBps);
-      if (typeof saved.strategyCode === "string" && saved.strategyCode.length > 0) {
-        setStrategyCode(saved.strategyCode);
-      }
-      if (typeof saved.strategyParamsRaw === "string") {
-        setStrategyParamsRaw(saved.strategyParamsRaw);
-      }
-      if (saved.mode === "builtin" || saved.mode === "custom") {
-        setMode(saved.mode);
-      }
-      if (typeof saved.builtinId === "string") {
-        setBuiltinId(saved.builtinId);
-      }
-      if (saved.mode === "builtin" && saved.builtinParams && typeof saved.builtinParams === "object") {
-        applyBuiltinParamState(saved.builtinParams as NumericParams);
-      } else {
-        applyBuiltinParamState({});
-      }
-    } catch (e) {
-      console.warn("Failed to load saved config", e);
-    }
-  }, [applyBuiltinParamState, PROFILE_STORAGE_KEY]);
+    };
+    loadForm();
+  }, [applyBuiltinParamState, activeProfile, FORM_SETTING_KEY]);
 
   useEffect(() => {
     if (!strategyParamsRaw.trim()) {
@@ -1272,39 +1341,43 @@ function BacktestPageContent() {
   const persistCustomPresets = useCallback(
     (presets: StrategyParamPreset[]) => {
       setCustomParamPresets(presets);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(presets));
-      }
+      apiFetch(`/user-settings/${PRESET_SETTING_KEY}`, {
+        method: "PUT",
+        body: JSON.stringify({ key: PRESET_SETTING_KEY, value: presets }),
+      }).catch(() => undefined);
     },
-    [PRESET_STORAGE_KEY],
+    [PRESET_SETTING_KEY],
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(PRESET_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const sanitized = parsed.filter(
-          (preset: unknown): preset is StrategyParamPreset =>
-            Boolean(
-              preset &&
-                typeof preset === "object" &&
-                "id" in preset &&
-                typeof (preset as { id?: unknown }).id === "string" &&
-                "label" in preset &&
-                typeof (preset as { label?: unknown }).label === "string" &&
-                "params" in preset &&
-                typeof (preset as { params?: unknown }).params === "object",
-            ),
-        );
-        setCustomParamPresets(sanitized);
+    const loadPresets = async () => {
+      try {
+        const res = await apiFetch(`/user-settings/${PRESET_SETTING_KEY}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const parsed = data.value;
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.filter(
+            (preset: unknown): preset is StrategyParamPreset =>
+              Boolean(
+                preset &&
+                  typeof preset === "object" &&
+                  "id" in preset &&
+                  typeof (preset as { id?: unknown }).id === "string" &&
+                  "label" in preset &&
+                  typeof (preset as { label?: unknown }).label === "string" &&
+                  "params" in preset &&
+                  typeof (preset as { params?: unknown }).params === "object",
+              ),
+          );
+          setCustomParamPresets(sanitized);
+        }
+      } catch (e) {
+        console.warn("Failed to load param presets", e);
       }
-    } catch (e) {
-      console.warn("Failed to load param presets", e);
-    }
-  }, [PRESET_STORAGE_KEY]);
+    };
+    loadPresets();
+  }, [PRESET_SETTING_KEY]);
 
   useEffect(() => {
     setLintStatus("idle");
@@ -1318,25 +1391,13 @@ function BacktestPageContent() {
     }
   }, [mode]);
 
-  // hydrate history
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem("priorsystems:history");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setHistory(parsed);
-      }
-    } catch (e) {
-      console.warn("Failed to load history", e);
-    }
-  }, []);
+  // history is kept in-memory; server runs are available via /runs
 
   // load built-in strategies
   useEffect(() => {
     const fetchBuiltins = async () => {
       try {
-        const res = await fetch(`${apiBase}/strategies`);
+        const res = await apiFetch("/strategies");
         if (!res.ok) return;
         const json = (await res.json()) as { strategies: BuiltinStrategy[] };
         setBuiltinList(json.strategies || []);
@@ -1351,13 +1412,13 @@ function BacktestPageContent() {
       }
     };
     fetchBuiltins();
-  }, [apiBase, applyBuiltinParamState, builtinId]);
+  }, [applyBuiltinParamState, builtinId]);
 
   const fetchServerRuns = useCallback(async () => {
     setServerRunsLoading(true);
     setServerRunsError(null);
     try {
-      const res = await fetch(`${apiBase}/runs`);
+      const res = await apiFetch("/runs");
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text);
@@ -1370,7 +1431,7 @@ function BacktestPageContent() {
     } finally {
       setServerRunsLoading(false);
     }
-  }, [apiBase]);
+  }, []);
 
   useEffect(() => {
     fetchServerRuns();
@@ -1414,7 +1475,7 @@ function BacktestPageContent() {
       setServerRunLoadingId(runId);
       setServerRunError(null);
       try {
-        const res = await fetch(`${apiBase}/runs/${runId}`);
+        const res = await apiFetch(`/runs/${runId}`);
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text}`);
@@ -1430,7 +1491,7 @@ function BacktestPageContent() {
         setServerRunLoadingId(null);
       }
     },
-    [apiBase, applyFormSnapshot, setDetailTab],
+    [applyFormSnapshot, setDetailTab],
   );
 
   const handleBuiltinParamChange = (param: BuiltinParam, rawValue: string) => {
@@ -1531,8 +1592,6 @@ function BacktestPageContent() {
 
   // persist form inputs
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (typeof window === "undefined") return;
     const payload = {
       symbol,
       csvPath,
@@ -1547,11 +1606,12 @@ function BacktestPageContent() {
       builtinParams,
     };
     const timeout = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      } catch (err) {
+      apiFetch(`/user-settings/${FORM_SETTING_KEY}`, {
+        method: "PUT",
+        body: JSON.stringify({ key: FORM_SETTING_KEY, value: payload }),
+      }).catch((err) => {
         console.warn("Failed to persist form state", err);
-      }
+      });
     }, 1000);
     return () => {
       window.clearTimeout(timeout);
@@ -1568,6 +1628,7 @@ function BacktestPageContent() {
     mode,
     builtinId,
     builtinParams,
+    FORM_SETTING_KEY,
   ]);
 
   const runLintCheck = useCallback(async () => {
@@ -1583,7 +1644,7 @@ function BacktestPageContent() {
     setLintStatus("checking");
     setLintMessage("Validating syntax...");
     try {
-      const res = await fetch(`${apiBase}/lint-strategy`, {
+      const res = await apiFetch("/lint-strategy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1611,7 +1672,7 @@ function BacktestPageContent() {
       setError(message);
       return false;
     }
-  }, [apiBase, mode, strategyCode]);
+  }, [mode, strategyCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1676,7 +1737,7 @@ function BacktestPageContent() {
               strategy_params: strategyParamsError ? null : strategyParamsObject,
             };
 
-      const res = await fetch(`${apiBase}/backtest`, {
+      const res = await apiFetch("/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1722,9 +1783,6 @@ function BacktestPageContent() {
       };
       const nextHistory = [entry, ...history].slice(0, 5);
       setHistory(nextHistory);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("priorsystems:history", JSON.stringify(nextHistory));
-      }
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "Backtest failed";
@@ -2430,7 +2488,6 @@ function BacktestPageContent() {
               datasetPath={csvPath}
               datasetName={lockedDataset.name}
               symbol={symbol}
-              apiBase={apiBase}
               startBar={startBar}
               maxBars={maxBars}
               initialCashOverride={usingPortfolio ? portfolioEquity ?? undefined : initialCash}

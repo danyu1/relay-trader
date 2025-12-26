@@ -15,6 +15,8 @@ import {
   Filler,
 } from "chart.js";
 import "@/utils/nativeDateAdapter";
+import { apiFetch } from "@/app/lib/api";
+import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
@@ -43,7 +45,7 @@ interface DatasetPreview {
 }
 
 interface DataSetProfile {
-  id: string;
+  id: number;
   datasetName: string;
   displayName: string;
   startIndex: number;
@@ -56,12 +58,12 @@ interface DataSetProfile {
   createdAt: string;
 }
 
-const STORAGE_KEY = "priorsystems:data-profiles";
 const FULL_SERIES_SAMPLE = -1;
 
 function DataSelectionPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { loading: authLoading } = useRequireAuth();
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<DatasetPreview | null>(null);
@@ -78,10 +80,11 @@ function DataSelectionPageContent() {
   const [initialEquity, setInitialEquity] = useState<number>(10000);
   const [savedProfiles, setSavedProfiles] = useState<DataSetProfile[]>([]);
   const [showSavedProfiles, setShowSavedProfiles] = useState(true);
+  const [activeProfileId, setActiveProfileId] = useState<number | null>(null);
 
   // Portfolio selection state
   const [usePortfolio, setUsePortfolio] = useState(false);
-  const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [portfolios, setPortfolios] = useState<any[]>([]);
 
   // Mini preview cache for dataset list
@@ -89,8 +92,77 @@ function DataSelectionPageContent() {
   const datasetPreviewsRef = useRef<Record<string, DatasetPreview>>({});
   const previewLoadingRef = useRef(false);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
   const isDashboardEntry = searchParams.get("entry") === "dashboard";
+
+  useEffect(() => {
+    if (typeof window === "undefined" || authLoading) return;
+    const storedProfiles = window.localStorage.getItem("priorsystems:data-profiles");
+    const storedActive = window.localStorage.getItem("priorsystems:active-profile");
+    const storedSelected = window.localStorage.getItem("priorsystems:selected-dataset");
+
+    if (!storedProfiles && !storedActive && !storedSelected) return;
+
+    const migrate = async () => {
+      try {
+        const profiles: DataSetProfile[] = storedProfiles ? JSON.parse(storedProfiles) : [];
+        const activeProfile: DataSetProfile | null = storedActive ? JSON.parse(storedActive) : null;
+
+        if (activeProfile) {
+          const res = await apiFetch("/dataset-profiles", {
+            method: "POST",
+            body: JSON.stringify({
+              datasetName: activeProfile.datasetName,
+              displayName: activeProfile.displayName,
+              startIndex: activeProfile.startIndex,
+              endIndex: activeProfile.endIndex,
+              startTimestamp: activeProfile.startTimestamp,
+              endTimestamp: activeProfile.endTimestamp,
+              startDate: activeProfile.startDate,
+              endDate: activeProfile.endDate,
+              initialEquity: activeProfile.initialEquity,
+            }),
+          });
+          if (res.ok) {
+            const saved = (await res.json()) as DataSetProfile;
+            await apiFetch("/user-settings/active-profile-id", {
+              method: "PUT",
+              body: JSON.stringify({ key: "active-profile-id", value: saved.id }),
+            });
+            await apiFetch("/user-settings/selected-dataset", {
+              method: "PUT",
+              body: JSON.stringify({ key: "selected-dataset", value: saved.datasetName }),
+            });
+          }
+        }
+
+        const remaining = profiles.filter((p) => !activeProfile || p.datasetName !== activeProfile.datasetName);
+        for (const profile of remaining) {
+          await apiFetch("/dataset-profiles", {
+            method: "POST",
+            body: JSON.stringify({
+              datasetName: profile.datasetName,
+              displayName: profile.displayName,
+              startIndex: profile.startIndex,
+              endIndex: profile.endIndex,
+              startTimestamp: profile.startTimestamp,
+              endTimestamp: profile.endTimestamp,
+              startDate: profile.startDate,
+              endDate: profile.endDate,
+              initialEquity: profile.initialEquity,
+            }),
+          });
+        }
+      } catch (error) {
+        console.error("Failed to migrate local profiles:", error);
+      } finally {
+        window.localStorage.removeItem("priorsystems:data-profiles");
+        window.localStorage.removeItem("priorsystems:active-profile");
+        window.localStorage.removeItem("priorsystems:selected-dataset");
+      }
+    };
+
+    migrate();
+  }, [authLoading]);
 
   const selectedDatasetInfo = useMemo(
     () => datasets.find((dataset) => dataset.name === selectedDataset) || null,
@@ -100,7 +172,7 @@ function DataSelectionPageContent() {
   const loadDatasets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/datasets`);
+      const res = await apiFetch("/datasets");
       const data = await res.json();
       setDatasets(data.datasets || []);
     } catch (error) {
@@ -108,30 +180,32 @@ function DataSelectionPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, []);
 
   const loadSavedProfiles = useCallback(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const profiles = JSON.parse(stored) as DataSetProfile[];
-        setSavedProfiles(profiles);
-      }
-    } catch (error) {
-      console.error("Failed to load saved profiles:", error);
-    }
+    apiFetch("/dataset-profiles")
+      .then((res) => res.json())
+      .then((data) => setSavedProfiles(data.profiles || []))
+      .catch((error) => {
+        console.error("Failed to load saved profiles:", error);
+      });
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     loadDatasets();
     loadSavedProfiles();
 
     // Load portfolios
-    const saved = localStorage.getItem("priorsystems:portfolios");
-    if (saved) {
-      setPortfolios(JSON.parse(saved));
-    }
-  }, [loadDatasets, loadSavedProfiles]);
+    apiFetch("/portfolios?context=builder")
+      .then((res) => res.json())
+      .then((data) => {
+        setPortfolios(data.portfolios || []);
+      })
+      .catch((error) => {
+        console.error("Failed to load portfolios:", error);
+      });
+  }, [authLoading, loadDatasets, loadSavedProfiles]);
 
   useEffect(() => {
     let mounted = true;
@@ -168,8 +242,8 @@ function DataSelectionPageContent() {
         }
         if (datasetPreviewsRef.current[dataset.name]) continue;
         try {
-          const res = await fetch(
-            `${apiBase}/dataset-preview?name=${encodeURIComponent(dataset.name)}&limit=50&sample=120`,
+          const res = await apiFetch(
+            `/dataset-preview?name=${encodeURIComponent(dataset.name)}&limit=50&sample=120`,
           );
           const data = await res.json();
           if (!cancelled) {
@@ -187,7 +261,7 @@ function DataSelectionPageContent() {
       cancelled = true;
       previewLoadingRef.current = false;
     };
-  }, [apiBase, datasets]);
+  }, [datasets]);
 
   // Update initial equity when portfolio is selected
   useEffect(() => {
@@ -216,8 +290,8 @@ function DataSelectionPageContent() {
     setEndMarkerIndex(null);
 
     try {
-      const res = await fetch(
-        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=1000&sample=${FULL_SERIES_SAMPLE}`,
+      const res = await apiFetch(
+        `/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=1000&sample=${FULL_SERIES_SAMPLE}`,
       );
       const data = await res.json();
       setPreviewData(data);
@@ -226,7 +300,7 @@ function DataSelectionPageContent() {
     } finally {
       setLoadingPreview(false);
     }
-  }, [apiBase]);
+  }, []);
 
   const resetMarkers = useCallback(() => {
     setStartMarkerIndex(null);
@@ -244,14 +318,31 @@ function DataSelectionPageContent() {
 
   useEffect(() => {
     if (selectedDataset || datasets.length === 0) return;
-    const stored = localStorage.getItem("priorsystems:selected-dataset");
-    if (!stored) return;
-    if (datasets.some((dataset) => dataset.name === stored)) {
-      handleSelectDataset(stored);
-    }
+    apiFetch("/user-settings/selected-dataset")
+      .then((res) => res.json())
+      .then((data) => {
+        const stored = data.value as string | null;
+        if (!stored) return;
+        if (datasets.some((dataset) => dataset.name === stored)) {
+          handleSelectDataset(stored);
+        }
+      })
+      .catch(() => undefined);
   }, [datasets, selectedDataset, handleSelectDataset]);
 
-  const handleLoadProfile = (profile: DataSetProfile) => {
+  useEffect(() => {
+    apiFetch("/user-settings/active-profile-id")
+      .then((res) => res.json())
+      .then((data) => {
+        const value = data.value;
+        if (typeof value === "number") {
+          setActiveProfileId(value);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const handleLoadProfile = useCallback((profile: DataSetProfile) => {
     // Find the dataset
     const dataset = datasets.find((d) => d.name === profile.datasetName);
     if (dataset) {
@@ -262,9 +353,17 @@ function DataSelectionPageContent() {
         setInitialEquity(profile.initialEquity);
       });
     }
-  };
+  }, [datasets, handleSelectDataset]);
 
-  const handleSaveAndContinue = () => {
+  useEffect(() => {
+    if (!activeProfileId || savedProfiles.length === 0) return;
+    const profile = savedProfiles.find((item) => item.id === activeProfileId);
+    if (profile) {
+      handleLoadProfile(profile);
+    }
+  }, [activeProfileId, savedProfiles, handleLoadProfile]);
+
+  const handleSaveAndContinue = async () => {
     if (!selectedDataset || startMarkerIndex === null || endMarkerIndex === null || previewSeries.length === 0) {
       alert("Please select a dataset and place both start and end markers on the chart.");
       return;
@@ -289,32 +388,35 @@ function DataSelectionPageContent() {
     const startDate = new Date(startPoint.timestamp).toISOString().slice(0, 10);
     const endDate = new Date(endPoint.timestamp).toISOString().slice(0, 10);
 
-    // Create profile
-    const profile: DataSetProfile = {
-      id: crypto.randomUUID(),
-      datasetName: selectedDataset,
-      displayName: selectedDatasetInfo?.display_name || selectedDatasetInfo?.symbol || selectedDataset,
-      startIndex: startMarkerIndex,
-      endIndex: endMarkerIndex,
-      startTimestamp: startPoint.timestamp,
-      endTimestamp: endPoint.timestamp,
-      startDate,
-      endDate,
-      initialEquity,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Save to localStorage
     try {
-      const existing = savedProfiles;
-      const updated = [profile, ...existing].slice(0, 20); // Keep last 20 profiles
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-
-      // Also save for backtest page
-      localStorage.setItem("priorsystems:selected-dataset", selectedDataset);
-      localStorage.setItem("priorsystems:active-profile", JSON.stringify(profile));
-
-      // Navigate to backtest
+      const res = await apiFetch("/dataset-profiles", {
+        method: "POST",
+        body: JSON.stringify({
+          datasetName: selectedDataset,
+          displayName: selectedDatasetInfo?.display_name || selectedDatasetInfo?.symbol || selectedDataset,
+          startIndex: startMarkerIndex,
+          endIndex: endMarkerIndex,
+          startTimestamp: startPoint.timestamp,
+          endTimestamp: endPoint.timestamp,
+          startDate,
+          endDate,
+          initialEquity,
+        }),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to save profile");
+      }
+      const profile = (await res.json()) as DataSetProfile;
+      setSavedProfiles((prev) => [profile, ...prev.filter((item) => item.id !== profile.id)].slice(0, 20));
+      await apiFetch("/user-settings/active-profile-id", {
+        method: "PUT",
+        body: JSON.stringify({ key: "active-profile-id", value: profile.id }),
+      });
+      await apiFetch("/user-settings/selected-dataset", {
+        method: "PUT",
+        body: JSON.stringify({ key: "selected-dataset", value: selectedDataset }),
+      });
       router.push("/backtest");
     } catch (error) {
       console.error("Failed to save profile:", error);
@@ -601,6 +703,10 @@ function DataSelectionPageContent() {
       ? `${dataset.start_label} → ${dataset.end_label}`
       : "");
 
+  if (authLoading) {
+    return null;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -879,7 +985,7 @@ function DataSelectionPageContent() {
                         </label>
                         <select
                           value={selectedPortfolioId || ""}
-                          onChange={(e) => setSelectedPortfolioId(e.target.value)}
+                          onChange={(e) => setSelectedPortfolioId(Number(e.target.value))}
                           className="w-full px-4 py-3 rounded-lg border border-gray-700 bg-gray-950 text-white focus:border-purple-500 focus:outline-none"
                         >
                           {portfolios.map((portfolio) => (

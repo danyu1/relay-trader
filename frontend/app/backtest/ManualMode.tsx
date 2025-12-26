@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { Chart as ChartJS, ChartEvent, ActiveElement } from "chart.js";
+import { apiFetch } from "@/app/lib/api";
 
 interface Trade {
   id: string;
@@ -28,7 +29,6 @@ interface ManualModeProps {
   datasetPath: string;
   datasetName: string;
   symbol: string;
-  apiBase: string;
   initialCashOverride?: number;
   startBar?: number;
   maxBars?: number;
@@ -37,7 +37,7 @@ interface ManualModeProps {
 }
 
 interface SavedConfiguration {
-  id: string;
+  id: number;
   name: string;
   datasetName: string;
   trades: Trade[];
@@ -49,7 +49,6 @@ export default function ManualMode({
   datasetPath,
   datasetName,
   symbol,
-  apiBase,
   initialCashOverride,
   startBar,
   maxBars,
@@ -99,6 +98,33 @@ export default function ManualMode({
   const [prices, setPrices] = useState<number[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const legacyConfigs = window.localStorage.getItem("priorsystems:fundamental-configs");
+    if (!legacyConfigs) return;
+    const migrate = async () => {
+      try {
+        const configs = JSON.parse(legacyConfigs) as SavedConfiguration[];
+        for (const config of configs) {
+          await apiFetch("/manual-configs", {
+            method: "POST",
+            body: JSON.stringify({
+              name: config.name,
+              datasetName: config.datasetName,
+              trades: config.trades,
+              initialCash: config.initialCash,
+            }),
+          });
+        }
+      } catch (error) {
+        console.error("Failed to migrate manual configs:", error);
+      } finally {
+        window.localStorage.removeItem("priorsystems:fundamental-configs");
+      }
+    };
+    migrate();
+  }, []);
+
   // Register zoom plugin on client side only
   const [zoomReady, setZoomReady] = useState(false);
   useEffect(() => {
@@ -111,17 +137,16 @@ export default function ManualMode({
   // Track if user is currently zooming/panning to prevent trade placement
   const isZoomingRef = useRef(false);
 
-  // Load saved configurations from localStorage
+  // Load saved configurations from API
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("priorsystems:fundamental-configs");
-      if (stored) {
-        const configs = JSON.parse(stored) as SavedConfiguration[];
-        setSavedConfigurations(configs);
-      }
-    } catch (error) {
-      console.error("Failed to load saved configurations:", error);
-    }
+    apiFetch("/manual-configs")
+      .then((res) => res.json())
+      .then((data) => {
+        setSavedConfigurations(data.configs || []);
+      })
+      .catch((error) => {
+        console.error("Failed to load saved configurations:", error);
+      });
   }, []);
 
   // Load price data when component mounts
@@ -131,7 +156,7 @@ export default function ManualMode({
       setError(null);
 
       try {
-        const res = await fetch(`${apiBase}/backtest`, {
+        const res = await apiFetch("/backtest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -178,7 +203,7 @@ export default function ManualMode({
     };
 
     loadPriceData();
-  }, [datasetPath, symbol, apiBase, maxBars, startBar]);
+  }, [datasetPath, symbol, maxBars, startBar]);
 
   const handleChartClick = (event: ChartEvent, elements: ActiveElement[]) => {
     // Don't place trades if user was zooming/panning
@@ -347,27 +372,34 @@ export default function ManualMode({
     setTakeProfit(trade.takeProfit ?? null);
   };
 
-  const handleSaveConfiguration = () => {
+  const handleSaveConfiguration = async () => {
     if (!configName.trim()) {
       alert("Please enter a configuration name");
       return;
     }
 
-    const newConfig: SavedConfiguration = {
-      id: crypto.randomUUID(),
-      name: configName.trim(),
-      datasetName,
-      trades: trades,
-      initialCash,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updated = [newConfig, ...savedConfigurations].slice(0, 20); // Keep last 20
-    setSavedConfigurations(updated);
-    localStorage.setItem("priorsystems:fundamental-configs", JSON.stringify(updated));
-
-    setShowSaveConfigModal(false);
-    setConfigName("");
+    try {
+      const res = await apiFetch("/manual-configs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: configName.trim(),
+          datasetName,
+          trades,
+          initialCash,
+        }),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to save configuration");
+      }
+      const saved = (await res.json()) as SavedConfiguration;
+      setSavedConfigurations((prev) => [saved, ...prev.filter((c) => c.id !== saved.id)].slice(0, 20));
+      setShowSaveConfigModal(false);
+      setConfigName("");
+    } catch (error) {
+      console.error("Failed to save configuration:", error);
+      alert("Failed to save configuration. Please try again.");
+    }
   };
 
   const handleLoadConfiguration = (config: SavedConfiguration) => {
@@ -381,10 +413,14 @@ export default function ManualMode({
     }
   };
 
-  const handleDeleteConfiguration = (id: string) => {
-    const updated = savedConfigurations.filter(c => c.id !== id);
-    setSavedConfigurations(updated);
-    localStorage.setItem("priorsystems:fundamental-configs", JSON.stringify(updated));
+  const handleDeleteConfiguration = (id: number) => {
+    apiFetch(`/manual-configs/${id}`, { method: "DELETE" })
+      .then(() => {
+        setSavedConfigurations((prev) => prev.filter((c) => c.id !== id));
+      })
+      .catch((error) => {
+        console.error("Failed to delete configuration:", error);
+      });
   };
 
   const handleRunSimulation = async () => {
@@ -456,7 +492,7 @@ export default function ManualMode({
         requestBody
       });
 
-      const response = await fetch(`${apiBase}/backtest`, {
+      const response = await apiFetch("/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),

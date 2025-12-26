@@ -15,6 +15,8 @@ import {
   Filler,
 } from "chart.js";
 import "@/utils/nativeDateAdapter";
+import { apiFetch } from "@/app/lib/api";
+import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
@@ -123,6 +125,7 @@ const PREVIEW_SAMPLE = 400;
 
 export default function DatasetsPage() {
   const router = useRouter();
+  const { loading: authLoading } = useRequireAuth();
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<DatasetMetadata | null>(null);
@@ -143,7 +146,19 @@ export default function DatasetsPage() {
   const [queueRunning, setQueueRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8002";
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("priorsystems:selected-dataset");
+    if (!stored) return;
+    apiFetch("/user-settings/selected-dataset", {
+      method: "PUT",
+      body: JSON.stringify({ key: "selected-dataset", value: stored }),
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        window.localStorage.removeItem("priorsystems:selected-dataset");
+      });
+  }, []);
 
   const selectedDatasetInfo = useMemo(
     () => datasets.find((dataset) => dataset.name === selectedDataset) || null,
@@ -198,7 +213,7 @@ export default function DatasetsPage() {
   const loadDatasets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/datasets`);
+      const res = await apiFetch("/datasets");
       const data = await res.json();
       setDatasets(data.datasets || []);
     } catch (error) {
@@ -206,7 +221,7 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, []);
 
   useEffect(() => {
     loadDatasets();
@@ -232,8 +247,8 @@ export default function DatasetsPage() {
       const selected = datasets.find((d) => d.name === datasetName);
 
       // Fetch metadata with some preview rows for the chart
-      const res = await fetch(
-        `${apiBase}/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=${PREVIEW_LIMIT}&sample=${PREVIEW_SAMPLE}`,
+      const res = await apiFetch(
+        `/dataset-preview?name=${encodeURIComponent(datasetName)}&limit=${PREVIEW_LIMIT}&sample=${PREVIEW_SAMPLE}`,
       );
       const data = await res.json();
       const totalRows = typeof selected?.rows === "number" ? selected.rows : Number(data.total_rows ?? 0) || 0;
@@ -255,8 +270,16 @@ export default function DatasetsPage() {
 
   const handleContinue = () => {
     if (selectedDataset) {
-      localStorage.setItem("priorsystems:selected-dataset", selectedDataset);
-      router.push("/data-selection");
+      apiFetch(`/user-settings/selected-dataset`, {
+        method: "PUT",
+        body: JSON.stringify({ key: "selected-dataset", value: selectedDataset }),
+      })
+        .then(() => {
+          router.push("/data-selection");
+        })
+        .catch(() => {
+          router.push("/data-selection");
+        });
     }
   };
 
@@ -277,7 +300,7 @@ export default function DatasetsPage() {
       if (refresh) {
         params.set("refresh", "true");
       }
-      const res = await fetch(`${apiBase}/download-symbol?${params.toString()}`, {
+      const res = await apiFetch(`/download-symbol?${params.toString()}`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -292,7 +315,7 @@ export default function DatasetsPage() {
       }
       return res.json();
     },
-    [apiBase],
+    [],
   );
 
   const handleDownload = async () => {
@@ -432,6 +455,10 @@ export default function DatasetsPage() {
     setPopularSearch("");
   };
 
+  if (authLoading) {
+    return null;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -483,7 +510,7 @@ export default function DatasetsPage() {
             <div className="flex flex-col gap-2 rounded-xl border border-gray-800/50 bg-gray-900/40 p-4 sm:flex-row sm:items-center sm:justify-between">
               <input
                 type="text"
-                placeholder="Search datasets by symbol, company, or range"
+                placeholder="Search your datasets by symbol, company, or range"
                 className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-white focus:outline-none sm:flex-1"
                 value={datasetSearch}
                 onChange={(e) => setDatasetSearch(e.target.value)}

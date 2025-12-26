@@ -1211,7 +1211,7 @@ export default function LivePricesPage() {
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {paginatedPositions.map((position, index) => {
-                  const actualIndex = currentPage * CARDS_PER_PAGE + index;
+                  const actualIndex = currentPage * ITEMS_PER_PAGE + index;
                   return (
                     <StockCard
                       key={position.id}

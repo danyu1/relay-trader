@@ -96,7 +96,7 @@ export default function HomePage() {
               <img src="/logo-white-full.svg" alt="Prior Systems" className="h-10 w-auto" />
             </div>
             <p className="text-sm text-slate-500">
-              © {new Date().getFullYear()} Prior Systems. Research platform for systematic traders.
+              © {new Date().getFullYear()} Prior Systems.
             </p>
           </div>
         </div>
@@ -227,7 +227,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             </h1>
 
             <p className="mb-10 text-xl text-slate-400 leading-relaxed">
-              Test mechanical strategies, simulate fundamental decisions, and track live performance—all in one unified research environment.
+              Test mechanical strategies, simulate fundamental decisions, and track live performance, all in one unified research environment.
             </p>
 
             <button

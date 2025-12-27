@@ -1704,6 +1704,16 @@ function BacktestPageContent() {
       return;
     }
 
+    // Validate that quantity doesn't exceed available cash for mechanical mode
+    if (mode === "builtin" && datasetPrice !== null) {
+      const positionCost = quantity * datasetPrice;
+      if (positionCost > initialCash) {
+        setError(`Insufficient funds! Position cost ($${positionCost.toFixed(2)}) exceeds initial cash ($${initialCash.toFixed(2)}). Maximum shares: ${Math.floor(initialCash / datasetPrice)}`);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       const body =
         mode === "builtin"
@@ -2734,20 +2744,33 @@ function BacktestPageContent() {
                           }}
                         />
                         {lockedDataset && datasetPrice !== null && (
-                          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
-                              <div className="text-gray-500">Price/Share</div>
-                              <div className="text-white font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
+                          <>
+                            <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+                              <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
+                                <div className="text-gray-500">Price/Share</div>
+                                <div className="text-white font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
+                              </div>
+                              <div className={`rounded px-2 py-1.5 border ${
+                                (datasetPrice * quantity) > initialCash
+                                  ? 'bg-red-950/30 border-red-700'
+                                  : 'bg-gray-800 border-gray-700'
+                              }`}>
+                                <div className="text-gray-500">Position Cost</div>
+                                <div className={`font-mono mt-0.5 ${
+                                  (datasetPrice * quantity) > initialCash ? 'text-red-400' : 'text-white'
+                                }`}>${(datasetPrice * quantity).toFixed(2)}</div>
+                              </div>
+                              <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
+                                <div className="text-gray-500">Max Shares</div>
+                                <div className="text-green-400 font-mono mt-0.5">{Math.floor(initialCash / datasetPrice)}</div>
+                              </div>
                             </div>
-                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
-                              <div className="text-gray-500">Position Cost</div>
-                              <div className="text-white font-mono mt-0.5">${(datasetPrice * quantity).toFixed(2)}</div>
-                            </div>
-                            <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
-                              <div className="text-gray-500">Max Shares</div>
-                              <div className="text-green-400 font-mono mt-0.5">{Math.floor(initialCash / datasetPrice)}</div>
-                            </div>
-                          </div>
+                            {(datasetPrice * quantity) > initialCash && (
+                              <div className="mt-2 p-2 rounded-lg bg-red-950/30 border border-red-700 text-[11px] text-red-400">
+                                ⚠ Position cost exceeds available cash. Reduce quantity to {Math.floor(initialCash / datasetPrice)} or less.
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                       <div>

@@ -342,6 +342,15 @@ export default function LivePricesPage() {
         if (currentPortfolio) {
           setCurrentPortfolioId(currentPortfolio.id);
           setChartConfig(currentPortfolio.chartConfig || DEFAULT_CHART_CONFIG);
+
+          // Merge portfolio lineStyles with the ones from /line-styles endpoint
+          if (currentPortfolio.lineStyles) {
+            setLineStyles(prev => ({
+              ...prev,
+              ...currentPortfolio.lineStyles,
+            }));
+          }
+
           // Restore the saved portfolio reference if it exists in notes
           if (currentPortfolio.notes) {
             try {

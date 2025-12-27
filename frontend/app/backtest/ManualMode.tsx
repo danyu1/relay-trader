@@ -134,6 +134,7 @@ export default function ManualMode({
         const res = await fetch(`${apiBase}/backtest`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             mode: "mechanical",
             csv_path: datasetPath,
@@ -459,6 +460,7 @@ export default function ManualMode({
       const response = await fetch(`${apiBase}/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(requestBody),
       });
 

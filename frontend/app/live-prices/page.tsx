@@ -341,6 +341,11 @@ export default function LivePricesPage() {
         if (currentPortfolio) {
           setCurrentPortfolioId(currentPortfolio.id);
           setChartConfig(currentPortfolio.chartConfig || DEFAULT_CHART_CONFIG);
+          // Restore the saved portfolio reference if it exists in notes
+          if (currentPortfolio.notes?.savedPortfolioId) {
+            setCurrentSavedPortfolioId(currentPortfolio.notes.savedPortfolioId);
+            setCurrentSavedPortfolioName(currentPortfolio.notes.savedPortfolioName || null);
+          }
           const positions = (currentPortfolio.holdings || []).map((holding: any, index: number) => {
             const metaName = holding.meta?.name;
             const baseColor = styleMap[holding.symbol]?.color || PRESET_COLORS[index % PRESET_COLORS.length];
@@ -438,6 +443,10 @@ export default function LivePricesPage() {
           chartConfig,
           lineStyles,
           holdings: buildHoldingsPayload(portfolio.positions),
+          notes: currentSavedPortfolioId ? {
+            savedPortfolioId: currentSavedPortfolioId,
+            savedPortfolioName: currentSavedPortfolioName,
+          } : undefined,
         };
         const res = await apiFetch("/portfolios", {
           method: "POST",
@@ -458,7 +467,7 @@ export default function LivePricesPage() {
         window.clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [authLoading, portfolio.positions, chartConfig, lineStyles, currentPortfolioId, buildHoldingsPayload]);
+  }, [authLoading, portfolio.positions, chartConfig, lineStyles, currentPortfolioId, buildHoldingsPayload, currentSavedPortfolioId, currentSavedPortfolioName]);
 
   // Memoize line styles array to prevent unnecessary re-renders
   const lineStylesArray = useMemo(() => {

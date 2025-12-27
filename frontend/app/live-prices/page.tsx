@@ -396,6 +396,13 @@ export default function LivePricesPage() {
             totalGainLoss,
             totalGainLossPercent,
           });
+
+          // Trigger price refresh after loading to update today's gain/loss
+          setTimeout(() => {
+            if (positions.length > 0) {
+              refreshPricesRef.current();
+            }
+          }, 100);
         }
 
         if (Array.isArray(savedData?.portfolios)) {
@@ -1003,13 +1010,26 @@ export default function LivePricesPage() {
         totalGainLossPercent,
       });
       setChartConfig(saved.chartConfig || DEFAULT_CHART_CONFIG);
+
+      // Merge saved lineStyles with current ones, prioritizing saved values
       if (saved.lineStyles) {
-        setLineStyles(saved.lineStyles);
+        setLineStyles(prev => ({
+          ...prev,
+          ...saved.lineStyles,
+        }));
       }
+
       setCurrentSavedPortfolioId(savedPortfolio?.id || null);
       setCurrentSavedPortfolioName(savedPortfolio?.name || null);
       setShowLoadDialog(false);
       alert(`Portfolio "${name}" loaded successfully!`);
+
+      // Trigger price refresh to update today's gain/loss
+      setTimeout(() => {
+        if (positions.length > 0) {
+          refreshPricesRef.current();
+        }
+      }, 100);
     },
     [savedPortfolios, lineStyles],
   );

@@ -124,6 +124,7 @@ export default function LivePricesPage() {
   const [savedPortfolios, setSavedPortfolios] = useState<
     { id: number; name: string; savedAt: number; positionCount: number; payload?: any }[]
   >([]);
+  const [currentSavedPortfolioId, setCurrentSavedPortfolioId] = useState<number | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -816,36 +817,57 @@ export default function LivePricesPage() {
     async (name: string) => {
       if (!name.trim()) return;
       try {
-        const res = await apiFetch("/portfolios", {
-          method: "POST",
-          body: JSON.stringify({
-            name: name.trim(),
-            context: SAVED_CONTEXT,
-            cash: 0,
-            chartConfig,
-            lineStyles,
-            holdings: buildHoldingsPayload(portfolio.positions),
-          }),
-        });
-        if (!res.ok) {
-          const msg = await res.text();
-          throw new Error(msg || "Failed to save portfolio");
+        const payload = {
+          name: name.trim(),
+          context: SAVED_CONTEXT,
+          cash: 0,
+          chartConfig,
+          lineStyles,
+          holdings: buildHoldingsPayload(portfolio.positions),
+        };
+
+        // If we have a currently loaded saved portfolio, update it
+        if (currentSavedPortfolioId) {
+          const res = await apiFetch(`/portfolios/${currentSavedPortfolioId}`, {
+            method: "PUT",
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const msg = await res.text();
+            throw new Error(msg || "Failed to update portfolio");
+          }
+          await refreshSavedPortfolios();
+          setShowSaveDialog(false);
+          alert(`Portfolio "${name}" updated successfully!`);
+        } else {
+          // Create a new portfolio
+          const res = await apiFetch("/portfolios", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const msg = await res.text();
+            throw new Error(msg || "Failed to save portfolio");
+          }
+          const saved = await res.json();
+          setCurrentSavedPortfolioId(saved?.id || null);
+          await refreshSavedPortfolios();
+          setShowSaveDialog(false);
+          alert(`Portfolio "${name}" saved successfully!`);
         }
-        await refreshSavedPortfolios();
-        setShowSaveDialog(false);
-        alert(`Portfolio "${name}" saved successfully!`);
       } catch (error) {
         console.error("Failed to save portfolio:", error);
         alert("Failed to save portfolio. Please try again.");
       }
     },
-    [portfolio.positions, chartConfig, lineStyles, buildHoldingsPayload, refreshSavedPortfolios],
+    [portfolio.positions, chartConfig, lineStyles, buildHoldingsPayload, refreshSavedPortfolios, currentSavedPortfolioId],
   );
 
   // Load a saved portfolio by name
   const loadPortfolio = useCallback(
     (name: string) => {
-      const saved = savedPortfolios.find((p) => p.name === name)?.payload;
+      const savedPortfolio = savedPortfolios.find((p) => p.name === name);
+      const saved = savedPortfolio?.payload;
       if (!saved) {
         alert(`Portfolio "${name}" not found.`);
         return;
@@ -896,6 +918,7 @@ export default function LivePricesPage() {
       if (saved.lineStyles) {
         setLineStyles(saved.lineStyles);
       }
+      setCurrentSavedPortfolioId(savedPortfolio?.id || null);
       setShowLoadDialog(false);
       alert(`Portfolio "${name}" loaded successfully!`);
     },
@@ -907,13 +930,19 @@ export default function LivePricesPage() {
     (name: string) => {
       const target = savedPortfolios.find((p) => p.name === name);
       if (!target) return;
+
+      // If we're deleting the currently loaded portfolio, clear the reference
+      if (target.id === currentSavedPortfolioId) {
+        setCurrentSavedPortfolioId(null);
+      }
+
       apiFetch(`/portfolios/${target.id}`, { method: "DELETE" })
         .then(() => refreshSavedPortfolios())
         .catch((error) => {
           console.error("Failed to delete portfolio:", error);
         });
     },
-    [savedPortfolios, refreshSavedPortfolios],
+    [savedPortfolios, refreshSavedPortfolios, currentSavedPortfolioId],
   );
 
   // Get list of saved portfolios
@@ -1327,6 +1356,7 @@ export default function LivePricesPage() {
         <SavePortfolioDialog
           onClose={() => setShowSaveDialog(false)}
           onSave={savePortfolio}
+          currentName={currentSavedPortfolioId ? savedPortfolios.find(p => p.id === currentSavedPortfolioId)?.name : undefined}
         />
       )}
 
@@ -2539,10 +2569,11 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, lineSt
 interface SavePortfolioDialogProps {
   onClose: () => void;
   onSave: (name: string) => void;
+  currentName?: string;
 }
 
-function SavePortfolioDialog({ onClose, onSave }: SavePortfolioDialogProps) {
-  const [name, setName] = useState("");
+function SavePortfolioDialog({ onClose, onSave, currentName }: SavePortfolioDialogProps) {
+  const [name, setName] = useState(currentName || "");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2555,7 +2586,7 @@ function SavePortfolioDialog({ onClose, onSave }: SavePortfolioDialogProps) {
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 rounded-xl border border-gray-800 max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">Save Portfolio</h3>
+          <h3 className="text-xl font-bold">{currentName ? "Update Portfolio" : "Save Portfolio"}</h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-white transition"
@@ -2594,7 +2625,7 @@ function SavePortfolioDialog({ onClose, onSave }: SavePortfolioDialogProps) {
               type="submit"
               className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
             >
-              Save
+              {currentName ? "Update" : "Save"}
             </button>
           </div>
         </form>

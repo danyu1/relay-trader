@@ -1048,12 +1048,19 @@ export default function LivePricesPage() {
             <div className="text-sm text-gray-400">
               Last updated: {getTimeSinceRefresh()}
             </div>
+            {currentSavedPortfolioId && (
+              <div className="text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
+                Editing: {savedPortfolios.find(p => p.id === currentSavedPortfolioId)?.name}
+              </div>
+            )}
             <button
               onClick={() => setShowSaveDialog(true)}
-              className="px-3 py-2 hover:bg-gray-800 rounded-lg transition text-sm font-medium"
-              title="Save Portfolio"
+              className={`px-3 py-2 hover:bg-gray-800 rounded-lg transition text-sm font-medium ${
+                currentSavedPortfolioId ? 'text-blue-400 border border-blue-500/30' : ''
+              }`}
+              title={currentSavedPortfolioId ? "Update current portfolio" : "Save new portfolio"}
             >
-              Save
+              {currentSavedPortfolioId ? 'Update' : 'Save'}
             </button>
             <button
               onClick={() => setShowLoadDialog(true)}
@@ -2681,22 +2688,29 @@ function SavePortfolioDialog({ onClose, onSave, currentName }: SavePortfolioDial
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 rounded-xl border border-gray-800 max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold">{currentName ? "Update Portfolio" : "Save Portfolio"}</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition"
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xl font-bold">{currentName ? "Update Portfolio" : "Save Portfolio"}</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white transition"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {currentName && (
+            <p className="text-sm text-gray-400">
+              Your changes will be saved to <span className="text-blue-400 font-medium">"{currentName}"</span>
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              Portfolio Name
+              Portfolio Name {currentName && <span className="text-xs text-gray-500">(press Update to keep this name)</span>}
             </label>
             <input
               type="text"

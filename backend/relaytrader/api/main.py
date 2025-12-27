@@ -323,7 +323,7 @@ def _holding_to_payload(holding: models.PortfolioHolding) -> PortfolioHoldingPay
         symbol=holding.symbol,
         shares=holding.shares,
         avgCost=holding.avg_cost,
-        costBasis=holding.cost_basis,
+        costBasis=holding.cost_basis if holding.cost_basis is not None else holding.avg_cost,
         purchaseDate=holding.purchase_date,
         referenceDate=holding.reference_date,
         currentPrice=holding.current_price,
@@ -1178,6 +1178,56 @@ def save_portfolio(
         )
         db.add(portfolio)
         db.flush()
+    for holding in payload.holdings:
+        portfolio.holdings.append(
+            models.PortfolioHolding(
+                symbol=holding.symbol,
+                shares=holding.shares,
+                avg_cost=holding.avgCost,
+                cost_basis=holding.costBasis,
+                purchase_date=holding.purchaseDate,
+                reference_date=holding.referenceDate,
+                current_price=holding.currentPrice,
+                current_value=holding.currentValue,
+                color=holding.color,
+                card_color=holding.cardColor,
+                line_thickness=holding.lineThickness,
+                font_size=holding.fontSize,
+                last_update=holding.lastUpdate,
+                meta=holding.meta,
+            )
+        )
+    db.commit()
+    db.refresh(portfolio)
+    return _portfolio_to_payload(portfolio)
+
+
+@app.put("/portfolios/{portfolio_id}", response_model=PortfolioPayload)
+def update_portfolio(
+    portfolio_id: int,
+    payload: PortfolioPayload,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> PortfolioPayload:
+    portfolio = (
+        db.query(models.Portfolio)
+        .filter(models.Portfolio.user_id == user.id, models.Portfolio.id == portfolio_id)
+        .first()
+    )
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+
+    portfolio.name = payload.name
+    portfolio.cash = payload.cash
+    portfolio.context = payload.context
+    portfolio.chart_config = payload.chartConfig
+    portfolio.line_styles = payload.lineStyles
+    portfolio.notes = payload.notes
+    portfolio.tags = payload.tags
+    portfolio.target_allocations = payload.targetAllocations
+    portfolio.performance_history = payload.performanceHistory
+    portfolio.holdings.clear()
+
     for holding in payload.holdings:
         portfolio.holdings.append(
             models.PortfolioHolding(

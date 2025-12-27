@@ -983,6 +983,26 @@ export default function LivePricesPage() {
     [savedPortfolios, lineStyles],
   );
 
+  // Create a new portfolio (clear current state)
+  const newPortfolio = useCallback(() => {
+    if (portfolio.positions.length > 0) {
+      const confirmed = confirm("This will clear your current portfolio. Any unsaved changes will be lost. Continue?");
+      if (!confirmed) return;
+    }
+
+    // Clear all portfolio data
+    setPortfolio({
+      positions: [],
+      totalValue: 0,
+      totalCost: 0,
+      totalGainLoss: 0,
+      totalGainLossPercent: 0,
+    });
+    setCurrentSavedPortfolioId(null);
+    setShowLoadDialog(false);
+    showToast("New portfolio created", "success");
+  }, [portfolio.positions.length, showToast]);
+
   // Delete a saved portfolio
   const deleteSavedPortfolio = useCallback(
     (name: string) => {
@@ -1432,6 +1452,7 @@ export default function LivePricesPage() {
           onClose={() => setShowLoadDialog(false)}
           onLoad={loadPortfolio}
           onDelete={deleteSavedPortfolio}
+          onNewPortfolio={newPortfolio}
           getSavedPortfolios={getSavedPortfolios}
         />
       )}
@@ -2765,10 +2786,11 @@ interface LoadPortfolioDialogProps {
   onClose: () => void;
   onLoad: (name: string) => void;
   onDelete: (name: string) => void;
+  onNewPortfolio: () => void;
   getSavedPortfolios: () => Array<{ name: string; savedAt: number; positionCount: number }>;
 }
 
-function LoadPortfolioDialog({ onClose, onLoad, onDelete, getSavedPortfolios }: LoadPortfolioDialogProps) {
+function LoadPortfolioDialog({ onClose, onLoad, onDelete, onNewPortfolio, getSavedPortfolios }: LoadPortfolioDialogProps) {
   const [savedPortfolios, setSavedPortfolios] = useState(getSavedPortfolios());
 
   useEffect(() => {
@@ -2838,10 +2860,19 @@ function LoadPortfolioDialog({ onClose, onLoad, onDelete, getSavedPortfolios }: 
           </div>
         )}
 
-        <div className="mt-6">
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onNewPortfolio}
+            className="flex-1 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition flex items-center justify-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Portfolio
+          </button>
           <button
             onClick={onClose}
-            className="w-full px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition"
+            className="flex-1 px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition"
           >
             Close
           </button>

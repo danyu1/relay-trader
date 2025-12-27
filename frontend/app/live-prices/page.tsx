@@ -343,10 +343,18 @@ export default function LivePricesPage() {
           setCurrentPortfolioId(currentPortfolio.id);
           setChartConfig(currentPortfolio.chartConfig || DEFAULT_CHART_CONFIG);
           // Restore the saved portfolio reference if it exists in notes
-          if (currentPortfolio.notes?.savedPortfolioId) {
-            console.log('[Live Prices] Restoring saved portfolio reference:', currentPortfolio.notes.savedPortfolioName);
-            setCurrentSavedPortfolioId(currentPortfolio.notes.savedPortfolioId);
-            setCurrentSavedPortfolioName(currentPortfolio.notes.savedPortfolioName || null);
+          if (currentPortfolio.notes) {
+            try {
+              const notesData = JSON.parse(currentPortfolio.notes);
+              if (notesData.savedPortfolioId) {
+                console.log('[Live Prices] Restoring saved portfolio reference:', notesData.savedPortfolioName);
+                setCurrentSavedPortfolioId(notesData.savedPortfolioId);
+                setCurrentSavedPortfolioName(notesData.savedPortfolioName || null);
+              }
+            } catch (e) {
+              // notes might not be JSON, ignore
+              console.log('[Live Prices] Notes field is not JSON, skipping saved portfolio restoration');
+            }
           }
           const positions = (currentPortfolio.holdings || []).map((holding: any, index: number) => {
             const metaName = holding.meta?.name;
@@ -446,10 +454,10 @@ export default function LivePricesPage() {
           chartConfig,
           lineStyles,
           holdings: buildHoldingsPayload(portfolio.positions),
-          notes: currentSavedPortfolioId ? {
+          notes: currentSavedPortfolioId ? JSON.stringify({
             savedPortfolioId: currentSavedPortfolioId,
             savedPortfolioName: currentSavedPortfolioName,
-          } : undefined,
+          }) : undefined,
         };
         console.log('[Live Prices] Auto-saving portfolio:', {
           portfolioId: currentPortfolioId,

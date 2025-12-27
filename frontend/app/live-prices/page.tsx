@@ -126,6 +126,7 @@ export default function LivePricesPage() {
     { id: number; name: string; savedAt: number; positionCount: number; payload?: any }[]
   >([]);
   const [currentSavedPortfolioId, setCurrentSavedPortfolioId] = useState<number | null>(null);
+  const [currentSavedPortfolioName, setCurrentSavedPortfolioName] = useState<string | null>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -906,6 +907,7 @@ export default function LivePricesPage() {
 
           const saved = await res.json();
           setCurrentSavedPortfolioId(saved?.id || null);
+          setCurrentSavedPortfolioName(name.trim());
           await refreshSavedPortfolios();
           setShowSaveDialog(false);
           showToast(`Portfolio "${name}" saved successfully!`, "success");
@@ -977,6 +979,7 @@ export default function LivePricesPage() {
         setLineStyles(saved.lineStyles);
       }
       setCurrentSavedPortfolioId(savedPortfolio?.id || null);
+      setCurrentSavedPortfolioName(savedPortfolio?.name || null);
       setShowLoadDialog(false);
       alert(`Portfolio "${name}" loaded successfully!`);
     },
@@ -999,6 +1002,7 @@ export default function LivePricesPage() {
       totalGainLossPercent: 0,
     });
     setCurrentSavedPortfolioId(null);
+    setCurrentSavedPortfolioName(null);
     setShowLoadDialog(false);
     showToast("New portfolio created", "success");
   }, [portfolio.positions.length, showToast]);
@@ -1012,6 +1016,7 @@ export default function LivePricesPage() {
       // If we're deleting the currently loaded portfolio, clear the reference
       if (target.id === currentSavedPortfolioId) {
         setCurrentSavedPortfolioId(null);
+        setCurrentSavedPortfolioName(null);
       }
 
       apiFetch(`/portfolios/${target.id}`, { method: "DELETE" })
@@ -1068,9 +1073,9 @@ export default function LivePricesPage() {
             <div className="text-sm text-gray-400">
               Last updated: {getTimeSinceRefresh()}
             </div>
-            {currentSavedPortfolioId && (
+            {currentSavedPortfolioId && currentSavedPortfolioName && (
               <div className="text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
-                Editing: {savedPortfolios.find(p => p.id === currentSavedPortfolioId)?.name}
+                Editing: {currentSavedPortfolioName}
               </div>
             )}
             <button
@@ -1442,7 +1447,7 @@ export default function LivePricesPage() {
         <SavePortfolioDialog
           onClose={() => setShowSaveDialog(false)}
           onSave={savePortfolio}
-          currentName={currentSavedPortfolioId ? savedPortfolios.find(p => p.id === currentSavedPortfolioId)?.name : undefined}
+          currentName={currentSavedPortfolioName || undefined}
         />
       )}
 

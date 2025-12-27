@@ -38,7 +38,7 @@ export default function SignupPage() {
     <main className="min-h-screen bg-black text-gray-100 flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-xl">
         <h1 className="text-2xl font-semibold mb-2">Create account</h1>
-        <p className="text-sm text-slate-400 mb-6">Set up your RelayTrader workspace.</p>
+        <p className="text-sm text-slate-400 mb-6">Set up your Prior Systems workspace.</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm text-slate-300 mb-1">Email</label>

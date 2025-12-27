@@ -3,17 +3,17 @@
   <path
     d="M 40 310 C 70 310, 100 280, 120 220 C 140 160, 160 80, 180 50 C 200 20, 220 20, 240 50 C 260 80, 280 160, 300 220 C 320 280, 350 310, 380 310"
     fill="none"
-    stroke="#1F2937"
+    stroke="#FFFFFF"
     stroke-width="8"
     stroke-linecap="round"
     stroke-linejoin="round"
   />
-  
+
   <!-- Three Bars -->
-  <rect x="140" y="190" width="40" height="120" fill="#1F2937" rx="2" />
-  <rect x="200" y="130" width="40" height="180" fill="#1F2937" rx="2" />
-  <rect x="260" y="235" width="40" height="75" fill="#1F2937" rx="2" />
-  
+  <rect x="140" y="190" width="40" height="120" fill="#FFFFFF" rx="2" />
+  <rect x="200" y="130" width="40" height="180" fill="#FFFFFF" rx="2" />
+  <rect x="260" y="235" width="40" height="75" fill="#FFFFFF" rx="2" />
+
   <!-- Text: PRIOR -->
   <text
     x="450"
@@ -21,12 +21,12 @@
     font-family="Arial, sans-serif"
     font-size="140"
     font-weight="700"
-    fill="#1F2937"
+    fill="#FFFFFF"
     letter-spacing="5"
   >
     PRIOR
   </text>
-  
+
   <!-- Text: SYSTEMS -->
   <text
     x="450"
@@ -34,7 +34,7 @@
     font-family="Arial, sans-serif"
     font-size="90"
     font-weight="400"
-    fill="#1F2937"
+    fill="#FFFFFF"
     letter-spacing="18"
   >
     SYSTEMS

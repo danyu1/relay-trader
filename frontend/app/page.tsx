@@ -56,8 +56,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex h-20 items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src="/logo.svg" alt="Prior Systems" width="32" height="32" />
-              <span className="text-xl tracking-tight text-white">Prior Systems</span>
+              <img src="/logo-white-full.svg" alt="Prior Systems" className="h-12 w-auto" />
             </div>
             <div className="flex items-center gap-8">
               <a href="#platform" className="text-sm text-slate-400 hover:text-white transition-colors">
@@ -94,8 +93,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src="/logo.svg" alt="Prior Systems" width="24" height="24" />
-              <span className="tracking-tight text-white">Prior Systems</span>
+              <img src="/logo-white-full.svg" alt="Prior Systems" className="h-10 w-auto" />
             </div>
             <p className="text-sm text-slate-500">
               © {new Date().getFullYear()} Prior Systems. Research platform for systematic traders.

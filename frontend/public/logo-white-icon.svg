@@ -1,0 +1,16 @@
+<svg viewBox="0 0 420 380" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bell Curve - Normal Distribution -->
+  <path
+    d="M 40 310 C 70 310, 100 280, 120 220 C 140 160, 160 80, 180 50 C 200 20, 220 20, 240 50 C 260 80, 280 160, 300 220 C 320 280, 350 310, 380 310"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Three Bars -->
+  <rect x="140" y="190" width="40" height="120" fill="#FFFFFF" rx="2" />
+  <rect x="200" y="130" width="40" height="180" fill="#FFFFFF" rx="2" />
+  <rect x="260" y="235" width="40" height="75" fill="#FFFFFF" rx="2" />
+</svg>

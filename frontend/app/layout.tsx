@@ -5,9 +5,9 @@ export const metadata: Metadata = {
   title: "Prior Systems Dashboard",
   description: "Backtest trading strategies through FastAPI backend.",
   icons: {
-    icon: "/logo-favicon.svg",
-    shortcut: "/logo-favicon.svg",
-    apple: "/logo-favicon.svg",
+    icon: "/favicon-blue.svg",
+    shortcut: "/favicon-blue.svg",
+    apple: "/favicon-blue.svg",
   },
 };
 

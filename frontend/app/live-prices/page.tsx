@@ -338,11 +338,13 @@ export default function LivePricesPage() {
         }
 
         const currentPortfolio = currentData.portfolios?.[0];
+        console.log('[Live Prices] Loaded current portfolio:', currentPortfolio ? `ID ${currentPortfolio.id} with ${currentPortfolio.holdings?.length || 0} holdings` : 'none');
         if (currentPortfolio) {
           setCurrentPortfolioId(currentPortfolio.id);
           setChartConfig(currentPortfolio.chartConfig || DEFAULT_CHART_CONFIG);
           // Restore the saved portfolio reference if it exists in notes
           if (currentPortfolio.notes?.savedPortfolioId) {
+            console.log('[Live Prices] Restoring saved portfolio reference:', currentPortfolio.notes.savedPortfolioName);
             setCurrentSavedPortfolioId(currentPortfolio.notes.savedPortfolioId);
             setCurrentSavedPortfolioName(currentPortfolio.notes.savedPortfolioName || null);
           }
@@ -399,10 +401,11 @@ export default function LivePricesPage() {
           setSavedPortfolios(list);
         }
       } catch (error) {
-        console.error("Failed to load portfolio:", error);
+        console.error("[Live Prices] Failed to load portfolio:", error);
       }
     };
     if (!authLoading) {
+      console.log('[Live Prices] Auth loaded, fetching portfolio data...');
       loadState();
     }
     return () => {
@@ -448,18 +451,26 @@ export default function LivePricesPage() {
             savedPortfolioName: currentSavedPortfolioName,
           } : undefined,
         };
+        console.log('[Live Prices] Auto-saving portfolio:', {
+          portfolioId: currentPortfolioId,
+          holdingsCount: portfolio.positions.length,
+          savedPortfolioRef: currentSavedPortfolioName,
+        });
         const res = await apiFetch("/portfolios", {
           method: "POST",
           body: JSON.stringify(payload),
         });
         if (res.ok) {
           const saved = await res.json();
+          console.log('[Live Prices] Auto-save successful, portfolio ID:', saved?.id);
           if (!currentPortfolioId && saved?.id) {
             setCurrentPortfolioId(saved.id);
           }
+        } else {
+          console.error('[Live Prices] Auto-save failed with status:', res.status);
         }
       } catch (error) {
-        console.error("Failed to persist live portfolio:", error);
+        console.error("[Live Prices] Failed to persist live portfolio:", error);
       }
     }, 800);
     return () => {

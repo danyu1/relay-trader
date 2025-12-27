@@ -118,6 +118,7 @@ export default function LivePricesPage() {
   const [showPotentialStockDialog, setShowPotentialStockDialog] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [clumpByStock, setClumpByStock] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [chartConfig, setChartConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [lineStyles, setLineStyles] = useState<Record<string, LineStyle>>({});
   const [currentPortfolioId, setCurrentPortfolioId] = useState<number | null>(null);
@@ -129,6 +130,12 @@ export default function LivePricesPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const lineStyleTimeoutRef = useRef<number | null>(null);
+
+  // Toast notification helper
+  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
 
   const buildDefaultLineStyles = useCallback(
     (positions: StockPosition[], thickness: number = DEFAULT_CHART_CONFIG.lineThickness) => {
@@ -815,7 +822,17 @@ export default function LivePricesPage() {
   // Save portfolio with a custom name
   const savePortfolio = useCallback(
     async (name: string) => {
-      if (!name.trim()) return;
+      if (!name.trim()) {
+        alert("Please enter a portfolio name");
+        return false;
+      }
+
+      // Validate that user is authenticated
+      if (!user) {
+        alert("You must be logged in to save portfolios");
+        return false;
+      }
+
       try {
         const payload = {
           name: name.trim(),
@@ -832,35 +849,76 @@ export default function LivePricesPage() {
             method: "PUT",
             body: JSON.stringify(payload),
           });
+
           if (!res.ok) {
-            const msg = await res.text();
-            throw new Error(msg || "Failed to update portfolio");
+            let errorMessage = "Failed to update portfolio";
+            try {
+              const errorData = await res.json();
+              errorMessage = errorData.detail || errorData.message || errorMessage;
+            } catch {
+              const textError = await res.text();
+              if (textError) errorMessage = textError;
+            }
+
+            // Handle specific error cases
+            if (res.status === 401) {
+              errorMessage = "You are not logged in. Please log in and try again.";
+            } else if (res.status === 404) {
+              errorMessage = "Portfolio not found. It may have been deleted.";
+              setCurrentSavedPortfolioId(null);
+            } else if (res.status === 403) {
+              errorMessage = "You don't have permission to update this portfolio.";
+            }
+
+            throw new Error(errorMessage);
           }
+
           await refreshSavedPortfolios();
           setShowSaveDialog(false);
-          alert(`Portfolio "${name}" updated successfully!`);
+          showToast(`Portfolio "${name}" updated successfully!`, "success");
+          return true;
         } else {
           // Create a new portfolio
           const res = await apiFetch("/portfolios", {
             method: "POST",
             body: JSON.stringify(payload),
           });
+
           if (!res.ok) {
-            const msg = await res.text();
-            throw new Error(msg || "Failed to save portfolio");
+            let errorMessage = "Failed to save portfolio";
+            try {
+              const errorData = await res.json();
+              errorMessage = errorData.detail || errorData.message || errorMessage;
+            } catch {
+              const textError = await res.text();
+              if (textError) errorMessage = textError;
+            }
+
+            // Handle specific error cases
+            if (res.status === 401) {
+              errorMessage = "You are not logged in. Please log in and try again.";
+            } else if (res.status === 409) {
+              errorMessage = "A portfolio with this name already exists.";
+            }
+
+            throw new Error(errorMessage);
           }
+
           const saved = await res.json();
           setCurrentSavedPortfolioId(saved?.id || null);
           await refreshSavedPortfolios();
           setShowSaveDialog(false);
-          alert(`Portfolio "${name}" saved successfully!`);
+          showToast(`Portfolio "${name}" saved successfully!`, "success");
+          return true;
         }
       } catch (error) {
         console.error("Failed to save portfolio:", error);
-        alert("Failed to save portfolio. Please try again.");
+        const errorMessage = error instanceof Error ? error.message : "Failed to save portfolio. Please try again.";
+        showToast(errorMessage, "error");
+        return false;
       }
     },
-    [portfolio.positions, chartConfig, lineStyles, buildHoldingsPayload, refreshSavedPortfolios, currentSavedPortfolioId],
+    [portfolio.positions, chartConfig, lineStyles, buildHoldingsPayload, refreshSavedPortfolios, currentSavedPortfolioId, user, showToast],
   );
 
   // Load a saved portfolio by name
@@ -1117,9 +1175,10 @@ export default function LivePricesPage() {
             ? (projectedTotalGainLoss / portfolio.totalCost) * 100
             : 0;
 
-          // Find the latest projection end date
+          // Find the latest projection end date (from today, not purchase date)
+          const today = Date.now();
           const latestProjectionDate = Math.max(
-            ...potentialStocks.map(p => p.purchaseDate + (p.holdingPeriod || 0) * 24 * 60 * 60 * 1000)
+            ...potentialStocks.map(p => today + (p.holdingPeriod || 0) * 24 * 60 * 60 * 1000)
           );
 
           return (
@@ -1486,6 +1545,28 @@ export default function LivePricesPage() {
           }}
         />
       )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-6 py-4 rounded-lg shadow-xl border animate-slide-up ${
+          toast.type === "success"
+            ? "bg-green-600/90 border-green-500/50 text-white"
+            : "bg-red-600/90 border-red-500/50 text-white"
+        }`}>
+          <div className="flex items-center gap-3">
+            {toast.type === "success" ? (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            <span className="font-medium">{toast.message}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1739,7 +1820,7 @@ function StockCard({ position, index, lineColor, onRemove, onLineColorChange, on
           <div className="flex justify-between">
             <span className="text-gray-400">Target Date:</span>
             <span className="font-medium text-purple-400">
-              {new Date(position.purchaseDate + position.holdingPeriod! * 24 * 60 * 60 * 1000).toLocaleDateString()}
+              {new Date(Date.now() + position.holdingPeriod! * 24 * 60 * 60 * 1000).toLocaleDateString()}
             </span>
           </div>
           <div className="flex justify-between pt-2 border-t border-gray-800">
@@ -2568,18 +2649,33 @@ function CustomizationPanel({ config, onConfigChange, onClose, portfolio, lineSt
 
 interface SavePortfolioDialogProps {
   onClose: () => void;
-  onSave: (name: string) => void;
+  onSave: (name: string) => Promise<boolean>;
   currentName?: string;
 }
 
 function SavePortfolioDialog({ onClose, onSave, currentName }: SavePortfolioDialogProps) {
   const [name, setName] = useState(currentName || "");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    onSave(name);
-    setName("");
+    if (!name.trim() || isSaving) return;
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const success = await onSave(name);
+      if (success) {
+        setName("");
+        // Dialog will be closed by parent component
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -2610,22 +2706,37 @@ function SavePortfolioDialog({ onClose, onSave, currentName }: SavePortfolioDial
               className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
               required
               autoFocus
+              disabled={isSaving}
             />
           </div>
+
+          {error && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              {error}
+            </div>
+          )}
 
           <div className="flex gap-3 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition"
+              className="flex-1 px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSaving}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
+              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={isSaving}
             >
-              {currentName ? "Update" : "Save"}
+              {isSaving && (
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {isSaving ? "Saving..." : (currentName ? "Update" : "Save")}
             </button>
           </div>
         </form>

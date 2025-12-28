@@ -59,7 +59,7 @@ export default function ManualMode({
   const [trades, setTrades] = useState<Trade[]>([]);
   const tradesRef = useRef<Trade[]>([]);
   const [currentMode, setCurrentMode] = useState<"buy_stock" | "buy_call" | "buy_put">("buy_stock");
-  const [quantity, setQuantity] = useState(100);
+  const [quantity, setQuantity] = useState<number | ''>(100);
   const [result, setResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,7 +272,7 @@ export default function ManualMode({
       type: currentMode.includes("stock") ? "stock" : currentMode.includes("call") ? "call" : "put",
       action: "buy", // Always BUY now
       price: clickedPrice,
-      quantity: quantity,
+      quantity: typeof quantity === 'number' ? quantity : 1,
       isOpen: true, // Mark as open until exit is set
     };
 
@@ -286,7 +286,8 @@ export default function ManualMode({
     }
 
     // Portfolio validation for BUY orders
-    const cost = newTrade.price * newTrade.quantity;
+    const effectiveQuantity = typeof quantity === 'number' ? quantity : 1;
+    const cost = newTrade.price * effectiveQuantity;
     if (cost > cash) {
       setError(`Insufficient funds! Need $${cost.toFixed(2)} but only have $${cash.toFixed(2)}`);
       setTimeout(() => setError(null), 3000);
@@ -753,23 +754,23 @@ export default function ManualMode({
               <div className="flex justify-between items-center">
                 <span className="text-xs text-gray-400">Position Value</span>
                 <span className="text-sm font-mono font-semibold text-blue-400">
-                  ${hoveredIndex !== null && prices[hoveredIndex] ? (quantity * prices[hoveredIndex]).toFixed(2) : '0.00'}
+                  ${hoveredIndex !== null && prices[hoveredIndex] ? ((typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex]).toFixed(2) : '0.00'}
                 </span>
               </div>
               <div className="h-px bg-gray-700 my-2"></div>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-gray-400 font-semibold">Current Total Equity</span>
                 <span className="text-base font-mono font-bold text-white">
-                  ${(cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)).toFixed(2)}
+                  ${(cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-gray-400">Total P&L</span>
                 <span className={`text-sm font-mono font-semibold ${
-                  (cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) >= initialCash ? 'text-green-400' : 'text-red-400'
+                  (cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)) >= initialCash ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {(cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) >= initialCash ? '+' : ''}
-                  {(((cash + (hoveredIndex !== null && prices[hoveredIndex] ? quantity * prices[hoveredIndex] : 0)) - initialCash) / initialCash * 100).toFixed(2)}%
+                  {(cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)) >= initialCash ? '+' : ''}
+                  {(((cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)) - initialCash) / initialCash * 100).toFixed(2)}%
                 </span>
               </div>
             </div>
@@ -825,20 +826,32 @@ export default function ManualMode({
                 step={currentMode.includes("stock") ? "1" : "1"}
                 value={quantity}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value) || 1;
-                  // Always cap quantity based on available cash and current/hovered price
-                  let maxAffordable = Infinity;
+                  const val = e.target.value;
+                  if (val === '') {
+                    setQuantity('');
+                  } else {
+                    const num = parseInt(val);
+                    if (!isNaN(num)) {
+                      // Always cap quantity based on available cash and current/hovered price
+                      let maxAffordable = Infinity;
 
-                  if (hoveredIndex !== null && prices[hoveredIndex]) {
-                    // Use hovered price if available
-                    maxAffordable = Math.floor(cash / prices[hoveredIndex]);
-                  } else if (prices.length > 0) {
-                    // Use the last price as estimate
-                    const lastPrice = prices[prices.length - 1];
-                    maxAffordable = Math.floor(cash / lastPrice);
+                      if (hoveredIndex !== null && prices[hoveredIndex]) {
+                        // Use hovered price if available
+                        maxAffordable = Math.floor(cash / prices[hoveredIndex]);
+                      } else if (prices.length > 0) {
+                        // Use the last price as estimate
+                        const lastPrice = prices[prices.length - 1];
+                        maxAffordable = Math.floor(cash / lastPrice);
+                      }
+
+                      setQuantity(Math.min(num, maxAffordable));
+                    }
                   }
-
-                  setQuantity(Math.min(val, maxAffordable));
+                }}
+                onBlur={(e) => {
+                  if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                    setQuantity(1);
+                  }
                 }}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white mb-2"
               />
@@ -871,10 +884,10 @@ export default function ManualMode({
                     </button>
                   </div>
                   <div className="text-[10px] text-gray-500 flex justify-between">
-                    <span>Cost: ${(quantity * prices[hoveredIndex!]).toFixed(2)}</span>
+                    <span>Cost: ${((typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex!]).toFixed(2)}</span>
                     <span>Max: {Math.floor(cash / prices[hoveredIndex!])} shares</span>
                   </div>
-                  {quantity * prices[hoveredIndex!] > cash && (
+                  {(typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex!] > cash && (
                     <div className="text-[10px] text-red-400 mt-1 font-semibold">
                       ⚠ Insufficient funds! Reduce quantity or add more cash.
                     </div>

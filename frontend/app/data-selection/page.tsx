@@ -705,7 +705,7 @@ function DataSelectionPageContent() {
       <nav className="border-b border-white/5 backdrop-blur-sm bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="Prior Systems" className="h-12 w-auto" />
+            <img src="/logo-white-full.svg" alt="Prior Systems" className="h-12 w-auto" />
           </div>
           <button
             onClick={() => router.push("/datasets")}

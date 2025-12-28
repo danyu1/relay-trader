@@ -920,7 +920,7 @@ function BacktestPageContent() {
   const [startBar, setStartBar] = useState<number | undefined>(undefined);
   const [commission, setCommission] = useState(0);
   const [slippageBps, setSlippageBps] = useState(0);
-  const [quantity, setQuantity] = useState(100);
+  const [quantity, setQuantity] = useState<number | ''>(100);
   const [initialCashInput, setInitialCashInput] = useState("100000");
   const [commissionInput, setCommissionInput] = useState("0");
   const [slippageInput, setSlippageInput] = useState("0");
@@ -1706,7 +1706,8 @@ function BacktestPageContent() {
 
     // Validate that quantity doesn't exceed available cash for mechanical mode
     if (mode === "builtin" && datasetPrice !== null) {
-      const positionCost = quantity * datasetPrice;
+      const effectiveQuantity = typeof quantity === 'number' ? quantity : 1;
+      const positionCost = effectiveQuantity * datasetPrice;
       if (positionCost > initialCash) {
         setError(`Insufficient funds! Position cost ($${positionCost.toFixed(2)}) exceeds initial cash ($${initialCash.toFixed(2)}). Maximum shares: ${Math.floor(initialCash / datasetPrice)}`);
         setLoading(false);
@@ -1719,7 +1720,7 @@ function BacktestPageContent() {
         mode === "builtin"
           ? {
               builtin_strategy_id: builtinId,
-              builtin_params: { ...builtinParams, qty: quantity },
+              builtin_params: { ...builtinParams, qty: typeof quantity === 'number' ? quantity : 1 },
               strategy_code: null,
               strategy_class_name: "",
               csv_path: csvPath,
@@ -2474,7 +2475,7 @@ function BacktestPageContent() {
                   ← Back
                 </Link>
                 <div className="h-6 w-px bg-gray-700"></div>
-                <img src="/logo.svg" alt="Prior Systems" className="h-7 w-auto" />
+                <img src="/logo-white-full.svg" alt="Prior Systems" className="h-7 w-auto" />
                 <div className="h-6 w-px bg-gray-700"></div>
                 <h1 className="text-lg font-bold tracking-tight text-gray-50">Backtest Console</h1>
               </div>
@@ -2739,8 +2740,20 @@ function BacktestPageContent() {
                           className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
                           value={quantity}
                           onChange={(e) => {
-                            const val = parseInt(e.target.value) || 1;
-                            setQuantity(val);
+                            const val = e.target.value;
+                            if (val === '') {
+                              setQuantity('');
+                            } else {
+                              const num = parseInt(val);
+                              if (!isNaN(num)) {
+                                setQuantity(num);
+                              }
+                            }
+                          }}
+                          onBlur={(e) => {
+                            if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                              setQuantity(1);
+                            }
                           }}
                         />
                         {lockedDataset && datasetPrice !== null && (
@@ -2751,21 +2764,21 @@ function BacktestPageContent() {
                                 <div className="text-white font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
                               </div>
                               <div className={`rounded px-2 py-1.5 border ${
-                                (datasetPrice * quantity) > initialCash
+                                (datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash
                                   ? 'bg-red-950/30 border-red-700'
                                   : 'bg-gray-800 border-gray-700'
                               }`}>
                                 <div className="text-gray-500">Position Cost</div>
                                 <div className={`font-mono mt-0.5 ${
-                                  (datasetPrice * quantity) > initialCash ? 'text-red-400' : 'text-white'
-                                }`}>${(datasetPrice * quantity).toFixed(2)}</div>
+                                  (datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash ? 'text-red-400' : 'text-white'
+                                }`}>${(datasetPrice * (typeof quantity === 'number' ? quantity : 1)).toFixed(2)}</div>
                               </div>
                               <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
                                 <div className="text-gray-500">Max Shares</div>
                                 <div className="text-green-400 font-mono mt-0.5">{Math.floor(initialCash / datasetPrice)}</div>
                               </div>
                             </div>
-                            {(datasetPrice * quantity) > initialCash && (
+                            {(datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash && (
                               <div className="mt-2 p-2 rounded-lg bg-red-950/30 border border-red-700 text-[11px] text-red-400">
                                 ⚠ Position cost exceeds available cash. Reduce quantity to {Math.floor(initialCash / datasetPrice)} or less.
                               </div>

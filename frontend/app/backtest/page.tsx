@@ -3351,13 +3351,19 @@ function BacktestPageContent() {
                         height={previewChartHeight}
                         onCrosshairMove={(data) => {
                           if (data) {
+                            const rawTime = typeof data.time === "number" ? data.time : Number(data.time);
+                            const formattedTime = Number.isFinite(rawTime)
+                              ? new Date(rawTime * 1000).toLocaleString()
+                              : String(data.time);
                             setPriceCrosshairData({
-                              time: new Date(data.time * 1000).toLocaleString(),
+                              time: formattedTime,
                               open: data.open,
                               high: data.high,
                               low: data.low,
                               close: data.close,
-                              volume: previewVolumeData.find(v => v.time === data.time)?.value,
+                              volume: Number.isFinite(rawTime)
+                                ? previewVolumeData.find((v) => v.time === rawTime)?.value
+                                : undefined,
                             });
                           } else {
                             setPriceCrosshairData(null);
@@ -3674,13 +3680,19 @@ function BacktestPageContent() {
                               theme="dark"
                               onCrosshairMove={(data) => {
                                 if (data) {
+                                  const rawTime = typeof data.time === "number" ? data.time : Number(data.time);
+                                  const formattedTime = Number.isFinite(rawTime)
+                                    ? new Date(rawTime * 1000).toLocaleString()
+                                    : String(data.time);
                                   setPriceCrosshairData({
-                                    time: new Date(data.time * 1000).toLocaleString(),
+                                    time: formattedTime,
                                     open: data.open,
                                     high: data.high,
                                     low: data.low,
                                     close: data.close,
-                                    volume: priceVolumeData.find(v => v.time === data.time)?.value,
+                                    volume: Number.isFinite(rawTime)
+                                      ? priceVolumeData.find((v) => v.time === rawTime)?.value
+                                      : undefined,
                                   });
                                 } else {
                                   setPriceCrosshairData(null);

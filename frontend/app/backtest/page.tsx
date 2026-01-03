@@ -2581,9 +2581,9 @@ function BacktestPageContent() {
     return <PortfolioMode />;
   }
 
-  const equityChartHeight = configCollapsed ? "h-[400px]" : "h-[360px]";
-  const priceChartHeight = configCollapsed ? 560 : 480;
-  const previewChartHeight = configCollapsed ? 720 : 650;
+  const equityChartHeight = configCollapsed ? "h-[480px]" : "h-[420px]";
+  const priceChartHeight = configCollapsed ? 640 : 560;
+  const previewChartHeight = configCollapsed ? 820 : 780;
 
   return (
     <>

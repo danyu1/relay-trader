@@ -106,8 +106,8 @@ export default function ManualMode({
   const [manualChartType, setManualChartType] = useState<CandleChartType>('candlestick');
   const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null);
   const [manualChartResetKey, setManualChartResetKey] = useState(0);
-  // Chart fills more vertical space - calculate based on viewport
-  const chartHeight = 600;
+  // Chart fills more vertical space - use calc to fill available space
+  const chartHeight = 720;
 
   // Convert price data to OHLC format for candlestick chart
   const ohlcData = useMemo(() => {

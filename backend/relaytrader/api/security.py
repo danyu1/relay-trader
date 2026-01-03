@@ -13,7 +13,7 @@ SESSION_COOKIE_NAME = "relaytrader_session"
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "dev-relaytrader-secret")
 ACCESS_TOKEN_EXPIRE_DAYS = int(os.getenv("AUTH_TOKEN_EXPIRE_DAYS", "7"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:

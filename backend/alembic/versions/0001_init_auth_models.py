@@ -1,19 +1,10 @@
-"""init auth + persistence models
-
-Revision ID: 0001_init
-Revises: 
-Create Date: 2025-01-02 00:00:00.000000
-"""
-
 from alembic import op
 import sqlalchemy as sa
-
 
 revision = "0001_init"
 down_revision = None
 branch_labels = None
 depends_on = None
-
 
 def upgrade() -> None:
     op.create_table(
@@ -175,7 +166,6 @@ def upgrade() -> None:
         sa.UniqueConstraint("user_id", "dataset_id", name="uq_annotation_user_dataset"),
     )
     op.create_index("ix_dataset_annotations_user_id", "dataset_annotations", ["user_id"])
-
 
 def downgrade() -> None:
     op.drop_table("dataset_annotations")

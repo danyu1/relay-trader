@@ -15,11 +15,13 @@
     "chartjs-adapter-date-fns": "^3.0.0",
     "chartjs-plugin-zoom": "^2.2.0",
     "date-fns": "^4.1.0",
+    "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.562.0",
     "next": "^16.1.1",
     "react": "^19.2.3",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "react-icons": "^5.5.0"
   },
   "devDependencies": {
     "@types/node": "^20",

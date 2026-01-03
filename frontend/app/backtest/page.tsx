@@ -33,6 +33,8 @@ import PortfolioMode from "./PortfolioMode";
 import { apiFetch, API_BASE } from "@/app/lib/api";
 import { useRequireAuth } from "@/app/hooks/useRequireAuth";
 import { UserDisplay } from "@/app/components/UserDisplay";
+import { CandlestickChart, ChartControls, CrosshairTooltip, convertPricesToOHLCWithVariation, generateVolumeData } from "@/app/components/charts";
+import type { ChartType as CandleChartType, OHLCData, CrosshairData, VolumeData, TradeMarker, ChartAnnotation, AnnotationMode } from "@/app/components/charts/types";
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, TimeScale, Tooltip, Legend, Filler, BarElement, BarController);
 
@@ -920,7 +922,7 @@ function BacktestPageContent() {
   const [startBar, setStartBar] = useState<number | undefined>(undefined);
   const [commission, setCommission] = useState(0);
   const [slippageBps, setSlippageBps] = useState(0);
-  const [quantity, setQuantity] = useState<number | ''>(100);
+  const [quantity, setQuantity] = useState<number | ''>(0);
   const [initialCashInput, setInitialCashInput] = useState("100000");
   const [commissionInput, setCommissionInput] = useState("0");
   const [slippageInput, setSlippageInput] = useState("0");
@@ -953,6 +955,15 @@ function BacktestPageContent() {
   const [showDatasetInfo, setShowDatasetInfo] = useState(false);
   const [showMechanicalGuide, setShowMechanicalGuide] = useState(true);
   const [showManualGuide, setShowManualGuide] = useState(true);
+  const [priceChartType, setPriceChartType] = useState<CandleChartType>('candlestick');
+  const [priceCrosshairData, setPriceCrosshairData] = useState<CrosshairData | null>(null);
+  const [priceChartResetKey, setPriceChartResetKey] = useState(0);
+  const [annotationMode, setAnnotationMode] = useState<AnnotationMode>("trend");
+  const [priceAnnotations, setPriceAnnotations] = useState<ChartAnnotation[]>([]);
+  const [previewTimestamps, setPreviewTimestamps] = useState<number[]>([]);
+  const [previewPrices, setPreviewPrices] = useState<number[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     setLayoutAnimating(true);
@@ -1126,6 +1137,8 @@ function BacktestPageContent() {
     const fetchDatasetInfo = async () => {
       setDatasetLoading(true);
       setDatasetError(null);
+      setPreviewLoading(true);
+      setPreviewError(null);
       try {
         const res = await apiFetch("/datasets");
         if (!res.ok) {
@@ -1146,9 +1159,12 @@ function BacktestPageContent() {
           setSymbol(derivedSymbol);
         }
 
-        // Fetch first price from dataset
+        // Fetch first price + preview series from dataset
         try {
-          const previewRes = await apiFetch(`/dataset-preview?name=${encodeURIComponent(match.name)}&limit=1`);
+          const sampleTarget = match.rows && match.rows <= 2000 ? -1 : 2000;
+          const previewRes = await apiFetch(
+            `/dataset-preview?name=${encodeURIComponent(match.name)}&limit=1&sample=${sampleTarget}`,
+          );
           if (previewRes.ok) {
             const previewData = await previewRes.json();
             if (previewData.head && previewData.head.length > 0) {
@@ -1158,9 +1174,27 @@ function BacktestPageContent() {
                 setDatasetPrice(typeof price === 'number' ? price : Number(price));
               }
             }
+
+            const series = Array.isArray(previewData.series) ? previewData.series : [];
+            const nextTimestamps: number[] = [];
+            const nextPrices: number[] = [];
+            series.forEach((point: { timestamp: number; close: number }) => {
+              if (!Number.isFinite(point?.timestamp) || !Number.isFinite(point?.close)) return;
+              nextTimestamps.push(Number(point.timestamp));
+              nextPrices.push(Number(point.close));
+            });
+            if (!cancelled) {
+              setPreviewTimestamps(nextTimestamps);
+              setPreviewPrices(nextPrices);
+            }
           }
         } catch (priceErr) {
-          console.warn("Failed to fetch dataset price:", priceErr);
+          if (!cancelled) {
+            setPreviewError("Failed to load price preview.");
+          }
+          console.warn("Failed to fetch dataset price preview:", priceErr);
+        } finally {
+          if (!cancelled) setPreviewLoading(false);
         }
       } catch (err) {
         if (cancelled) return;
@@ -1168,7 +1202,10 @@ function BacktestPageContent() {
         setDatasetError(message);
         setLockedDataset(null);
       } finally {
-        if (!cancelled) setDatasetLoading(false);
+        if (!cancelled) {
+          setDatasetLoading(false);
+          setPreviewLoading(false);
+        }
       }
     };
     fetchDatasetInfo();
@@ -1282,13 +1319,14 @@ function BacktestPageContent() {
           typeof activeProfile?.initialEquity === "number" && Number.isFinite(activeProfile?.initialEquity);
 
         if (saved.symbol) setSymbol(saved.symbol);
-        if (saved.csvPath) setCsvPath(saved.csvPath);
+        // Don't restore saved csvPath if a dataset was just selected from data-selection page
+        // The lockedDatasetName takes priority over saved form state
+        // csvPath will be set by the lockedDataset useEffect when the dataset loads
         if (typeof saved.initialCash === "number" && !hasProfileEquity) {
           setInitialCash(saved.initialCash);
         }
-        if (typeof saved.maxBars === "number" || saved.maxBars === null) {
-          setMaxBars(saved.maxBars ?? undefined);
-        }
+        // Don't restore maxBars/startBar from saved form if activeProfile is set
+        // The profile's startIndex/endIndex take priority
         if (typeof saved.commission === "number") setCommission(saved.commission);
         if (typeof saved.slippageBps === "number") setSlippageBps(saved.slippageBps);
         if (typeof saved.strategyCode === "string" && saved.strategyCode.length > 0) {
@@ -1841,16 +1879,31 @@ function BacktestPageContent() {
       : Math.min(Math.max(chartOffset, 0), 1);
   const windowStart = totalBars ? Math.min(maxStartIndex, Math.floor(offsetValue * maxStartIndex)) : 0;
   const windowEnd = totalBars ? Math.min(totalBars, windowStart + windowSize) : 0;
-  const timelineWindow = totalBars ? timeline.slice(windowStart, windowEnd) : [];
-  const timelineForWindow = timelineWindow.length ? timelineWindow : timeline;
+  const timelineWindow = useMemo(
+    () => (totalBars ? timeline.slice(windowStart, windowEnd) : []),
+    [timeline, totalBars, windowStart, windowEnd],
+  );
+  const timelineForWindow = useMemo(
+    () => (timelineWindow.length ? timelineWindow : timeline),
+    [timelineWindow, timeline],
+  );
   const windowRange: [number | null, number | null] = timelineForWindow.length
     ? [timelineForWindow[0], timelineForWindow[timelineForWindow.length - 1]]
     : [null, null];
 
-  const priceSeriesWindow = totalBars ? priceSeries.slice(windowStart, windowEnd) : priceSeries;
-  const equityWindow = totalBars ? equityCurve.slice(windowStart, windowEnd) : equityCurve;
   const drawdownSeries = result?.stats.drawdown_curve || [];
-  const drawdownWindow = totalBars ? drawdownSeries.slice(windowStart, windowEnd) : drawdownSeries;
+  const priceSeriesWindow = useMemo(
+    () => (totalBars ? priceSeries.slice(windowStart, windowEnd) : priceSeries),
+    [priceSeries, totalBars, windowStart, windowEnd],
+  );
+  const equityWindow = useMemo(
+    () => (totalBars ? equityCurve.slice(windowStart, windowEnd) : equityCurve),
+    [equityCurve, totalBars, windowStart, windowEnd],
+  );
+  const drawdownWindow = useMemo(
+    () => (totalBars ? drawdownSeries.slice(windowStart, windowEnd) : drawdownSeries),
+    [drawdownSeries, totalBars, windowStart, windowEnd],
+  );
 
   const findNearestIndex = useCallback(
     (ts: number, fallbackIdx: number) => {
@@ -2278,6 +2331,74 @@ function BacktestPageContent() {
         }
       : null;
 
+  // Convert price data to OHLC format for candlestick chart
+  const priceOHLCData: OHLCData[] = useMemo(() => {
+    if (priceSeriesWindow.length && timelineForWindow.length) {
+      return convertPricesToOHLCWithVariation(
+        timelineForWindow.map(t => typeof t === 'number' ? t : Date.parse(t as string)),
+        priceSeriesWindow,
+        0.3 // 0.3% volatility for realistic candlesticks
+      );
+    }
+    return [];
+  }, [priceSeriesWindow, timelineForWindow]);
+
+  // Generate volume data for candlestick chart
+  const priceVolumeData: VolumeData[] = useMemo(() => {
+    if (priceSeriesWindow.length && timelineForWindow.length) {
+      return generateVolumeData(
+        timelineForWindow.map(t => typeof t === 'number' ? t : Date.parse(t as string)),
+        priceSeriesWindow,
+        100000 // base volume
+      );
+    }
+    return [];
+  }, [priceSeriesWindow, timelineForWindow]);
+
+  // Convert trade markers to candlestick chart format
+  const priceTradeMarkers: TradeMarker[] = useMemo(() => {
+    return visibleTradeMarkersPrice.map((m: any) => ({
+      time: (typeof m.x === 'number' ? m.x / 1000 : Math.floor(Date.parse(m.x as string) / 1000)) as any,
+      position: m.meta?.trade?.side?.toLowerCase() === 'buy' ? 'belowBar' as const : 'aboveBar' as const,
+      color: m.meta?.trade?.side?.toLowerCase() === 'buy' ? '#10b981' : '#ef4444',
+      shape: 'arrowUp' as const,
+      text: m.meta?.trade?.side?.toLowerCase() === 'buy' ? 'B' : 'S',
+    }));
+  }, [visibleTradeMarkersPrice]);
+
+  const previewWindow = useMemo(() => {
+    if (!previewTimestamps.length || !previewPrices.length) {
+      return { timestamps: [] as number[], prices: [] as number[] };
+    }
+    if (activeProfile && previewTimestamps.length > activeProfile.endIndex) {
+      const start = Math.max(0, activeProfile.startIndex);
+      const end = Math.min(previewTimestamps.length, activeProfile.endIndex + 1);
+      return {
+        timestamps: previewTimestamps.slice(start, end),
+        prices: previewPrices.slice(start, end),
+      };
+    }
+    return { timestamps: previewTimestamps, prices: previewPrices };
+  }, [previewPrices, previewTimestamps, activeProfile]);
+
+  const previewOHLCData: OHLCData[] = useMemo(() => {
+    if (!previewWindow.timestamps.length || !previewWindow.prices.length) return [];
+    return convertPricesToOHLCWithVariation(previewWindow.timestamps, previewWindow.prices, 0.3);
+  }, [previewWindow]);
+
+  const previewVolumeData: VolumeData[] = useMemo(() => {
+    if (!previewWindow.timestamps.length || !previewWindow.prices.length) return [];
+    return generateVolumeData(previewWindow.timestamps, previewWindow.prices, 100000);
+  }, [previewWindow]);
+
+  const combinedPriceMarkers = useMemo(() => {
+    return [...priceTradeMarkers].sort((a, b) => {
+      if (a.time !== b.time) return a.time - b.time;
+      if (a.position === b.position) return 0;
+      return a.position === "belowBar" ? -1 : 1;
+    });
+  }, [priceTradeMarkers]);
+
   const drawdownData: MixedLineData | null =
     drawdownPoints.length > 0
       ? {
@@ -2460,6 +2581,10 @@ function BacktestPageContent() {
     return <PortfolioMode />;
   }
 
+  const equityChartHeight = configCollapsed ? "h-[360px]" : "h-[320px]";
+  const priceChartHeight = configCollapsed ? 520 : 420;
+  const previewChartHeight = configCollapsed ? 680 : 600;
+
   return (
     <>
       <main className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-gray-100">
@@ -2469,7 +2594,7 @@ function BacktestPageContent() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Link
-                  href="/dashboard"
+                  href="/data-selection"
                   className="px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
                 >
                   ← Back
@@ -3152,14 +3277,112 @@ function BacktestPageContent() {
             {/* RIGHT CONTENT AREA */}
             <main className="mt-4 flex-1 space-y-6 transition-all duration-200 lg:mt-0 lg:min-w-0">
               {!result ? (
-                /* Empty State */
-                <div className="flex min-h-[600px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
-                  <div className="text-center">
-                    <div className="mb-3 text-4xl">📊</div>
-                    <h3 className="mb-2 text-lg font-semibold text-gray-200">No Results Yet</h3>
-                    <p className="text-sm text-gray-400">Configure your strategy and run a backtest to see results</p>
+                previewLoading ? (
+                  <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
+                    <div className="text-center">
+                      <div className="mb-3 text-4xl">📈</div>
+                      <h3 className="mb-2 text-lg font-semibold text-gray-200">Loading Price Chart…</h3>
+                      <p className="text-sm text-gray-400">Fetching dataset preview for charting</p>
+                    </div>
                   </div>
-                </div>
+                ) : previewOHLCData.length > 0 ? (
+                  <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
+                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-50">Price Chart Preview</h2>
+                        <p className="text-xs text-gray-400">
+                          Explore the dataset and draw trendlines or horizontal levels before running a backtest.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ChartControls
+                          chartType={priceChartType}
+                          onChartTypeChange={setPriceChartType}
+                          showTimeframeSelector={false}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setAnnotationMode((mode) => (mode === "trend" ? "none" : "trend"))}
+                          className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
+                            annotationMode === "trend"
+                              ? "border-sky-400 text-sky-200"
+                              : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                          }`}
+                        >
+                          Trend
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAnnotationMode((mode) => (mode === "horizontal" ? "none" : "horizontal"))}
+                          className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
+                            annotationMode === "horizontal"
+                              ? "border-rose-400 text-rose-200"
+                              : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                          }`}
+                        >
+                          Horizontal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPriceAnnotations([])}
+                          disabled={priceAnnotations.length === 0}
+                          className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Clear Drawings
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPriceChartResetKey((key) => key + 1)}
+                          className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                        >
+                          Reset Zoom
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <CandlestickChart
+                        key={`${chartInstanceKey}-preview`}
+                        data={previewOHLCData}
+                        volumeData={previewVolumeData}
+                        chartType={priceChartType}
+                        resetSignal={priceChartResetKey}
+                        theme="dark"
+                        height={previewChartHeight}
+                        onCrosshairMove={(data) => {
+                          if (data) {
+                            setPriceCrosshairData({
+                              time: new Date(data.time * 1000).toLocaleString(),
+                              open: data.open,
+                              high: data.high,
+                              low: data.low,
+                              close: data.close,
+                              volume: previewVolumeData.find(v => v.time === data.time)?.value,
+                            });
+                          } else {
+                            setPriceCrosshairData(null);
+                          }
+                        }}
+                        tradeMarkers={combinedPriceMarkers}
+                        annotationMode={annotationMode}
+                        annotations={priceAnnotations}
+                        onAnnotationsChange={setPriceAnnotations}
+                        showVolume={true}
+                      />
+                      <CrosshairTooltip data={priceCrosshairData} position="top-left" />
+                    </div>
+                  </section>
+                ) : (
+                  <div className="flex min-h-[600px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
+                    <div className="text-center">
+                      <div className="mb-3 text-4xl">📊</div>
+                      <h3 className="mb-2 text-lg font-semibold text-gray-200">No Results Yet</h3>
+                      <p className="text-sm text-gray-400">
+                        {previewError ?? "Configure your strategy and run a backtest to see results"}
+                      </p>
+                    </div>
+                  </div>
+                )
               ) : (
                 <>
                   {/* Equity Summary */}
@@ -3351,7 +3574,7 @@ function BacktestPageContent() {
                     </div>
                   </section>
 
-                  {/* Charts Grid - Equity + Price Side by Side */}
+                  {/* Charts Grid - Equity + Price Stacked */}
                   <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <h2 className="text-lg font-semibold text-gray-50">Charts</h2>
@@ -3369,8 +3592,8 @@ function BacktestPageContent() {
                       </div>
                     </div>
 
-                    {/* Charts Side by Side */}
-                    <div className="grid gap-4 lg:grid-cols-2">
+                    {/* Charts Stacked */}
+                    <div className="grid grid-cols-1 gap-4">
                       {equityData && (
                         <div
                           className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
@@ -3383,29 +3606,95 @@ function BacktestPageContent() {
                             onBrush={handleBrushRange}
                             onPinchZoom={handlePinchZoom}
                             brushDisabled={!timeline.length}
-                            className="h-[320px]"
+                            className={equityChartHeight}
                             animationKey={chartAnimationKey}
                             layoutAnimating={layoutAnimating}
                           />
                         </div>
                       )}
-                      {priceData && (
+                      {priceOHLCData.length > 0 && (
                         <div
                           className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
                           style={{ animationDelay: chartsIntro ? "100ms" : "0ms" }}
                         >
-                          <div className="mb-2 text-xs font-semibold text-gray-300">Price Chart</div>
-                          <ZoomableChart
-                            key={`${chartInstanceKey}-price`}
-                            data={priceData}
-                            options={priceOptions}
-                            onBrush={handleBrushRange}
-                            onPinchZoom={handlePinchZoom}
-                            brushDisabled={!timeline.length}
-                            className="h-[320px]"
-                            animationKey={chartAnimationKey}
-                            layoutAnimating={layoutAnimating}
-                          />
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="text-xs font-semibold text-gray-300">Price Chart</div>
+                            <div className="flex items-center gap-2">
+                              <ChartControls
+                                chartType={priceChartType}
+                                onChartTypeChange={setPriceChartType}
+                                showTimeframeSelector={false}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setAnnotationMode((mode) => (mode === "trend" ? "none" : "trend"))}
+                                className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
+                                  annotationMode === "trend"
+                                    ? "border-sky-400 text-sky-200"
+                                    : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                                }`}
+                              >
+                                Trend
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAnnotationMode((mode) => (mode === "horizontal" ? "none" : "horizontal"))}
+                                className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
+                                  annotationMode === "horizontal"
+                                    ? "border-rose-400 text-rose-200"
+                                    : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                                }`}
+                              >
+                                Horizontal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPriceAnnotations([])}
+                                disabled={priceAnnotations.length === 0}
+                                className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Clear Drawings
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPriceChartResetKey((key) => key + 1)}
+                                className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                              >
+                                Reset Zoom
+                              </button>
+                            </div>
+                          </div>
+                          <div className="relative">
+                            <CandlestickChart
+                              key={`${chartInstanceKey}-price`}
+                              data={priceOHLCData}
+                              volumeData={priceVolumeData}
+                              chartType={priceChartType}
+                              resetSignal={priceChartResetKey}
+                              theme="dark"
+                              onCrosshairMove={(data) => {
+                                if (data) {
+                                  setPriceCrosshairData({
+                                    time: new Date(data.time * 1000).toLocaleString(),
+                                    open: data.open,
+                                    high: data.high,
+                                    low: data.low,
+                                    close: data.close,
+                                    volume: priceVolumeData.find(v => v.time === data.time)?.value,
+                                  });
+                                } else {
+                                  setPriceCrosshairData(null);
+                                }
+                              }}
+                              tradeMarkers={combinedPriceMarkers}
+                              annotationMode={annotationMode}
+                              annotations={priceAnnotations}
+                              onAnnotationsChange={setPriceAnnotations}
+                              showVolume={true}
+                              height={priceChartHeight}
+                            />
+                            <CrosshairTooltip data={priceCrosshairData} position="top-left" />
+                          </div>
                         </div>
                       )}
                     </div>

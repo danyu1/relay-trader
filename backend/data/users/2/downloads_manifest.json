@@ -1,0 +1,54 @@
+{
+  "SPY_20250102-20260101.csv": {
+    "symbol": "SPY",
+    "company_name": "SPDR S&P 500 ETF",
+    "display_name": "SPDR S&P 500 ETF (SPY)",
+    "filename": "SPY_20250102-20260101.csv",
+    "path": "/home/danyul/relay-trader/backend/data/users/2/SPY_20250102-20260101.csv",
+    "rows": 250,
+    "start": 1735880400000,
+    "end": 1767330000000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "2025-01-02",
+    "end_date_label": "2026-01-01",
+    "date_range_label": "2025-01-02 \u2192 2026-01-01",
+    "downloaded_at": "2026-01-03T03:40:07.352044Z",
+    "request_key": "SPY:1y",
+    "start_param": null,
+    "end_param": null,
+    "period": "1y"
+  },
+  "AMZN_20210103-20260101.csv": {
+    "symbol": "AMZN",
+    "company_name": "Amazon.com, Inc.",
+    "display_name": "Amazon.com, Inc. (AMZN)",
+    "filename": "AMZN_20210103-20260101.csv",
+    "path": "/home/danyul/relay-trader/backend/data/users/2/AMZN_20210103-20260101.csv",
+    "rows": 1256,
+    "start": 1609736400000,
+    "end": 1767330000000,
+    "columns": [
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "start_date_label": "2021-01-03",
+    "end_date_label": "2026-01-01",
+    "date_range_label": "2021-01-03 \u2192 2026-01-01",
+    "downloaded_at": "2026-01-03T03:57:12.056171Z",
+    "request_key": "AMZN:5y",
+    "start_param": null,
+    "end_param": null,
+    "period": "5y"
+  }
+}

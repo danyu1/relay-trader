@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Line } from "react-chartjs-2";
 import { Chart as ChartJS, ChartEvent, ActiveElement } from "chart.js";
+import { CandlestickChart, ChartControls, CrosshairTooltip, convertPricesToOHLCWithVariation, generateVolumeData } from "@/app/components/charts";
+import type { ChartType as CandleChartType, CrosshairData } from "@/app/components/charts/types";
 
 interface Trade {
   id: string;
@@ -59,7 +61,7 @@ export default function ManualMode({
   const [trades, setTrades] = useState<Trade[]>([]);
   const tradesRef = useRef<Trade[]>([]);
   const [currentMode, setCurrentMode] = useState<"buy_stock" | "buy_call" | "buy_put">("buy_stock");
-  const [quantity, setQuantity] = useState<number | ''>(100);
+  const [quantity, setQuantity] = useState<number | ''>(0);
   const [result, setResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +100,181 @@ export default function ManualMode({
   const [timestamps, setTimestamps] = useState<number[]>([]);
   const [prices, setPrices] = useState<number[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Chart type state
+  const [manualChartType, setManualChartType] = useState<CandleChartType>('candlestick');
+  const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null);
+  const [manualChartResetKey, setManualChartResetKey] = useState(0);
+  const chartHeight = showGuide ? 384 : 520;
+
+  // Convert price data to OHLC format for candlestick chart
+  const ohlcData = useMemo(() => {
+    if (prices.length === 0 || timestamps.length === 0) return [];
+    return convertPricesToOHLCWithVariation(timestamps, prices);
+  }, [prices, timestamps]);
+
+  // Generate volume data
+  const volumeData = useMemo(() => {
+    if (prices.length === 0 || timestamps.length === 0) return [];
+    return generateVolumeData(timestamps, prices);
+  }, [prices, timestamps]);
+
+  const candlestickTradeMarkers = useMemo(() => {
+    if (!trades.length) return [];
+    const markers = trades.flatMap((trade) => {
+      const entryTime = Math.floor(trade.timestamp / 1000);
+      const isStock = trade.type === "stock";
+      const entryColor = isStock ? "#22c55e" : trade.type === "call" ? "#3b82f6" : "#f97316";
+      const entryText = isStock ? "B" : trade.type === "call" ? "C" : "P";
+      const rows = [
+        {
+          time: entryTime,
+          position: "belowBar" as const,
+          color: entryColor,
+          shape: "arrowUp" as const,
+          text: entryText,
+        },
+      ];
+
+      if (trade.exitTimestamp) {
+        const exitTime = Math.floor(trade.exitTimestamp / 1000);
+        const exitColor = isStock
+          ? "#ef4444"
+          : trade.exitPrice && trade.price
+          ? trade.exitPrice >= trade.price
+            ? "#22c55e"
+            : "#ef4444"
+          : "#ef4444";
+        rows.push({
+          time: exitTime,
+          position: "aboveBar" as const,
+          color: exitColor,
+          shape: "arrowDown" as const,
+          text: isStock ? "S" : "X",
+        });
+      }
+
+      return rows;
+    });
+
+    return markers.sort((a, b) => {
+      if (a.time !== b.time) return a.time - b.time;
+      if (a.position === b.position) return 0;
+      return a.position === "belowBar" ? -1 : 1;
+    });
+  }, [trades]);
+
+  // Handle candlestick chart click for trading
+  const handleCandlestickChartClick = useCallback((time: number, price: number, dataIndex: number) => {
+    // Don't place trades if user was zooming/panning
+    if (isZoomingRef.current) {
+      isZoomingRef.current = false;
+      return;
+    }
+
+    if (dataIndex < 0 || dataIndex >= timestamps.length || dataIndex >= prices.length) {
+      setError(`Cannot place trade outside the backtest range (bar ${dataIndex}). Valid range: 0-${timestamps.length - 1}`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    const clickedTimestamp = timestamps[dataIndex];
+    const clickedPrice = prices[dataIndex];
+
+    // Check if we're setting an exit for a pending trade
+    if (pendingExit) {
+      // Convert chart-relative index to absolute dataset index for comparison
+      const absoluteExitIndex = (startBar ?? 0) + dataIndex;
+
+      // Validate exit is after entry (both in absolute indices now)
+      if (absoluteExitIndex <= pendingExit.index) {
+        setError("Exit must be after entry point");
+        setTimeout(() => setError(null), 3000);
+        return;
+      }
+
+      // Update the pending trade with exit info
+      const updatedTrade = {
+        ...pendingExit,
+        exitTimestamp: clickedTimestamp,
+        exitIndex: absoluteExitIndex,
+        exitPrice: clickedPrice,
+        stopLoss: stopLoss ?? undefined,
+        takeProfit: takeProfit ?? undefined,
+        isOpen: false,
+      };
+
+      const updatedTrades = [...trades.filter((t) => t.id !== pendingExit.id), updatedTrade];
+      setTrades(updatedTrades);
+      tradesRef.current = updatedTrades;
+
+      // Clear pending exit state
+      setPendingExit(null);
+      setShowExitModal(false);
+      setStopLoss(null);
+      setTakeProfit(null);
+      setExitDate("");
+      setExitDaysInAdvance(null);
+
+      if (chartRef.current) {
+        chartRef.current.update();
+      }
+      return;
+    }
+
+    // Create BUY trade at this point
+    const absoluteIndex = (startBar ?? 0) + dataIndex;
+
+    const newTrade: Trade = {
+      id: `trade_${Date.now()}`,
+      timestamp: clickedTimestamp,
+      index: absoluteIndex,
+      type: currentMode.includes("stock") ? "stock" : currentMode.includes("call") ? "call" : "put",
+      action: "buy",
+      price: clickedPrice,
+      quantity: typeof quantity === 'number' ? quantity : 1,
+      isOpen: true,
+    };
+
+    // For options, set strike and expiry
+    if (newTrade.type !== "stock") {
+      newTrade.strike = Math.round(clickedPrice);
+      const expiryDate = new Date(clickedTimestamp);
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      newTrade.expiry = expiryDate.toISOString().split("T")[0];
+    }
+
+    // Portfolio validation for BUY orders
+    const effectiveQuantity = typeof quantity === 'number' ? quantity : 1;
+    const cost = newTrade.price * effectiveQuantity;
+    if (cost > cash) {
+      setError(`Insufficient funds! Need $${cost.toFixed(2)} but only have $${cash.toFixed(2)}`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+    // Deduct cash
+    setCash(cash - cost);
+
+    console.log('Adding BUY trade:', newTrade);
+    const updatedTrades = [...trades, newTrade];
+    setTrades(updatedTrades);
+    tradesRef.current = updatedTrades;
+
+    // Set this as pending exit and show modal
+    setPendingExit(newTrade);
+    setShowExitModal(true);
+
+    // Initialize exit date to a week later
+    const weekLater = new Date(clickedTimestamp);
+    weekLater.setDate(weekLater.getDate() + 7);
+    setExitDate(weekLater.toISOString().split("T")[0]);
+    setExitDaysInAdvance(7);
+
+    // Force chart redraw
+    if (chartRef.current) {
+      chartRef.current.update();
+    }
+  }, [timestamps, prices, pendingExit, startBar, trades, currentMode, quantity, cash, stopLoss, takeProfit]);
 
   // Register zoom plugin on client side only
   const [zoomReady, setZoomReady] = useState(false);
@@ -323,6 +500,14 @@ export default function ManualMode({
     }
   };
 
+  const handleChartReset = () => {
+    if (manualChartType === "line") {
+      handleResetZoom();
+      return;
+    }
+    setManualChartResetKey((key) => key + 1);
+  };
+
   const handleDeleteTrade = (id: string) => {
     const updatedTrades = trades.filter((t) => t.id !== id);
     setTrades(updatedTrades);
@@ -414,7 +599,7 @@ export default function ManualMode({
         action: t.action,
         strike: t.strike!,
         expiry: t.expiry!,
-        contracts: Math.floor(t.quantity / 100), // Convert shares to contracts
+        contracts: t.quantity,
         note: t.note,
       }));
 
@@ -1038,15 +1223,49 @@ export default function ManualMode({
                   ? `${symbol} Price Chart - Click to Set EXIT Point`
                   : `${symbol} Price Chart - Click to Place Entry`}
               </h3>
-              <button
-                onClick={handleResetZoom}
-                className="rounded-lg border border-gray-700 px-3 py-1 text-xs font-semibold text-gray-400 transition hover:border-white hover:text-white"
-              >
-                Reset Zoom
-              </button>
+              <div className="flex items-center gap-2">
+                <ChartControls
+                  chartType={manualChartType}
+                  onChartTypeChange={setManualChartType}
+                  showTimeframeSelector={false}
+                />
+                <button
+                  onClick={handleChartReset}
+                  className="rounded-lg border border-gray-700 px-3 py-1 text-xs font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                >
+                  Reset Zoom
+                </button>
+              </div>
             </div>
-            <div className="h-96">
-              <Line
+
+            {/* Candlestick/Area Chart (TradingView style) */}
+            {ohlcData.length > 0 && (manualChartType === 'candlestick' || manualChartType === 'area') && (
+              <div
+                className="relative transition-[height] duration-500 ease-out"
+                style={{ height: `${chartHeight}px` }}
+              >
+                <CandlestickChart
+                  data={ohlcData}
+                  volumeData={volumeData}
+                  chartType={manualChartType}
+                  height={chartHeight}
+                  showVolume={true}
+                  tradeMarkers={candlestickTradeMarkers}
+                  resetSignal={manualChartResetKey}
+                  onCrosshairMove={setCrosshairData}
+                  onClick={handleCandlestickChartClick}
+                />
+                <CrosshairTooltip data={crosshairData} position="top-left" />
+              </div>
+            )}
+
+            {/* Legacy Chart.js Line Chart */}
+            {manualChartType === 'line' && (
+              <div
+                className="transition-[height] duration-500 ease-out"
+                style={{ height: `${chartHeight}px` }}
+              >
+                <Line
                 ref={chartRef}
                 data={{
                   labels: timestamps.map((ts) => formatDate(ts)),
@@ -1163,7 +1382,8 @@ export default function ManualMode({
                   },
                 }}
               />
-            </div>
+              </div>
+            )}
             <p className="mt-3 text-xs text-gray-500 text-center">
               {pendingExit ? (
                 <span className="text-orange-400 font-semibold">

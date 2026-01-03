@@ -362,7 +362,7 @@ export default function CandlestickChart({
           if (seriesData) {
             if ('open' in seriesData && 'high' in seriesData && 'low' in seriesData && 'close' in seriesData) {
               onCrosshairMoveRef.current({
-                time: currentTime,
+                time: formatTimeForDisplay(currentTime),
                 open: seriesData.open,
                 high: seriesData.high,
                 low: seriesData.low,
@@ -370,7 +370,7 @@ export default function CandlestickChart({
               })
             } else if ('value' in seriesData) {
               onCrosshairMoveRef.current({
-                time: currentTime,
+                time: formatTimeForDisplay(currentTime),
                 open: seriesData.value,
                 high: seriesData.value,
                 low: seriesData.value,

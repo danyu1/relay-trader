@@ -48,23 +48,12 @@ export default function ChartDemo() {
 
   const { ohlc, volume } = generateSampleData(100)
 
-  const handleCrosshairMove = (data: OHLCData | null) => {
-    if (data) {
-      setCrosshairData({
-        time: formatChartTime(data.time, true),
-        open: data.open,
-        high: data.high,
-        low: data.low,
-        close: data.close,
-        volume: volume.find(v => v.time === data.time)?.value,
-      })
-    } else {
-      setCrosshairData(null)
-    }
+  const handleCrosshairMove = (data: CrosshairData | null) => {
+    setCrosshairData(data)
   }
 
-  const handleChartClick = (time: number, price: number) => {
-    console.log('Clicked:', { time: formatChartTime(time), price })
+  const handleChartClick = (time: number, price: number, index: number) => {
+    console.log('Clicked:', { time: formatChartTime(time), price, index })
   }
 
   return (

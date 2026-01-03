@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Line } from "react-chartjs-2";
 import { Chart as ChartJS, ChartEvent, ActiveElement } from "chart.js";
 import { CandlestickChart, ChartControls, CrosshairTooltip, convertPricesToOHLCWithVariation, generateVolumeData } from "@/app/components/charts";
-import type { ChartType as CandleChartType, CrosshairData } from "@/app/components/charts/types";
+import type { ChartType as CandleChartType, CrosshairData, TradeMarker } from "@/app/components/charts/types";
 
 interface Trade {
   id: string;
@@ -119,14 +119,14 @@ export default function ManualMode({
     return generateVolumeData(timestamps, prices);
   }, [prices, timestamps]);
 
-  const candlestickTradeMarkers = useMemo(() => {
+  const candlestickTradeMarkers = useMemo<TradeMarker[]>(() => {
     if (!trades.length) return [];
-    const markers = trades.flatMap((trade) => {
+    const markers = trades.flatMap<TradeMarker>((trade) => {
       const entryTime = Math.floor(trade.timestamp / 1000);
       const isStock = trade.type === "stock";
       const entryColor = isStock ? "#22c55e" : trade.type === "call" ? "#3b82f6" : "#f97316";
       const entryText = isStock ? "B" : trade.type === "call" ? "C" : "P";
-      const rows = [
+      const rows: TradeMarker[] = [
         {
           time: entryTime,
           position: "belowBar" as const,

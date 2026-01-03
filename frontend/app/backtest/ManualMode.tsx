@@ -95,6 +95,7 @@ export default function ManualMode({
   const [showSaveConfigModal, setShowSaveConfigModal] = useState(false);
   const [showLoadConfigModal, setShowLoadConfigModal] = useState(false);
   const [configName, setConfigName] = useState("");
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Load price data from a quick backtest
   const [timestamps, setTimestamps] = useState<number[]>([]);
@@ -105,7 +106,8 @@ export default function ManualMode({
   const [manualChartType, setManualChartType] = useState<CandleChartType>('candlestick');
   const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null);
   const [manualChartResetKey, setManualChartResetKey] = useState(0);
-  const chartHeight = showGuide ? 384 : 520;
+  // Chart fills more vertical space - calculate based on viewport
+  const chartHeight = 600;
 
   // Convert price data to OHLC format for candlestick chart
   const ohlcData = useMemo(() => {
@@ -842,34 +844,7 @@ export default function ManualMode({
         </div>
       )}
 
-      {/* Instructions */}
-      {showGuide && (
-        <div className="rounded-xl border border-blue-900/50 bg-blue-950/30 p-4">
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <h3 className="text-sm font-semibold text-blue-400">How to Use Fundamental Mode</h3>
-            {setShowGuide && (
-              <button
-                type="button"
-                onClick={() => setShowGuide(false)}
-                className="text-blue-400 hover:text-white transition text-lg leading-none"
-                title="Dismiss guide"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-          <ol className="text-sm text-blue-300 space-y-1 list-decimal list-inside">
-            <li>Select trade type(Buy Stock, Buy Call, or Buy Put)</li>
-            <li><strong>Click</strong> on the chart where you want to ENTER the trade</li>
-            <li>Set your exit strategy: choose a date OR click the chart again for your EXIT point</li>
-            <li>Optional: Set stop loss and take profit levels for risk management</li>
-            <li>Hold <strong>Shift + Drag</strong> to zoom, or use <strong>mouse wheel</strong> to zoom in/out</li>
-            <li>Click "Run Simulation" to see how your trades would have performed</li>
-          </ol>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
         {/* Left Panel - Trade Controls */}
         <div className="space-y-4">
           {/* Dataset & Backtest Range Info */}
@@ -1231,9 +1206,16 @@ export default function ManualMode({
                 />
                 <button
                   onClick={handleChartReset}
-                  className="rounded-lg border border-gray-700 px-3 py-1 text-xs font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                  className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-400 transition hover:border-white hover:text-white"
                 >
                   Reset Zoom
+                </button>
+                <button
+                  onClick={() => setShowHelpModal(true)}
+                  className="rounded-lg border border-gray-700 px-2 py-1.5 text-xs font-semibold text-gray-400 transition hover:border-blue-500 hover:text-blue-400"
+                  title="How to use"
+                >
+                  ?
                 </button>
               </div>
             </div>
@@ -1849,6 +1831,37 @@ export default function ManualMode({
                 No saved configurations yet
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">How to Use Fundamental Mode</h3>
+              <button
+                onClick={() => setShowHelpModal(false)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <ol className="text-sm text-gray-300 space-y-2 list-decimal list-inside">
+              <li>Select trade type (<span className="text-green-400">Buy Stock</span>, <span className="text-blue-400">Buy Call</span>, or <span className="text-orange-400">Buy Put</span>)</li>
+              <li><strong className="text-white">Click</strong> on the chart where you want to <span className="text-green-400">ENTER</span> the trade</li>
+              <li>Set your exit strategy: choose a date OR click the chart again for your <span className="text-red-400">EXIT</span> point</li>
+              <li>Optional: Set stop loss and take profit levels for risk management</li>
+              <li>Use <strong className="text-white">mouse wheel</strong> to zoom in/out</li>
+              <li>Click <span className="text-white font-semibold">"Run Simulation"</span> to see how your trades would have performed</li>
+            </ol>
+            <button
+              onClick={() => setShowHelpModal(false)}
+              className="w-full mt-4 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition"
+            >
+              Got it
+            </button>
           </div>
         </div>
       )}

@@ -221,7 +221,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             </div>
 
             <h1 className="mb-6 text-6xl tracking-tight text-white">
-              Research that
+              Do research that
               <br />
               <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-cyan-500 bg-clip-text text-transparent">moves markets</span>
             </h1>
@@ -231,7 +231,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             </p>
 
             <button
-              onClick={onGetStarted}
+              onClick={onGetStarted}i
               className="group inline-flex items-center gap-3 rounded-lg bg-blue-600 px-8 py-4 text-white transition-all hover:bg-blue-700 hover:gap-4"
             >
               <span className="text-lg">Start Backtesting</span>

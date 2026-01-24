@@ -806,7 +806,7 @@ export default function ManualMode({
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-3">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
-          <p className="text-gray-600">
+          <p className="text-gray-400">
             {isLoadingData ? "Loading price data for manual trading..." : "Initializing chart..."}
           </p>
         </div>
@@ -820,10 +820,10 @@ export default function ManualMode({
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-3 max-w-md">
           <div className="text-red-400 text-lg">⚠️ Failed to Load Data</div>
-          <p className="text-gray-600">{error}</p>
+          <p className="text-gray-400">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-orange-600 text-gray-900 rounded-lg hover:bg-orange-700 transition"
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
           >
             Retry
           </button>
@@ -849,45 +849,45 @@ export default function ManualMode({
         <div className="space-y-4">
           {/* Dataset & Backtest Range Info */}
           {timestamps.length > 0 && (
-            <div className="rounded-xl border border-orange-700 bg-orange-50/30 p-3">
-              <h3 className="text-xs font-semibold text-orange-500 mb-2">Active Dataset</h3>
+            <div className="rounded-xl border border-blue-800 bg-blue-950/30 p-3">
+              <h3 className="text-xs font-semibold text-blue-300 mb-2">Active Dataset</h3>
               <div className="space-y-1 text-[11px] mb-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-orange-600">Dataset:</span>
-                  <span className="text-gray-900 font-mono font-semibold">{datasetName}</span>
+                  <span className="text-blue-400">Dataset:</span>
+                  <span className="text-white font-mono font-semibold">{datasetName}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-orange-600">Symbol:</span>
-                  <span className="text-gray-900 font-mono font-semibold">{symbol}</span>
+                  <span className="text-blue-400">Symbol:</span>
+                  <span className="text-white font-mono font-semibold">{symbol}</span>
                 </div>
               </div>
-              <div className="border-t border-orange-700/50 pt-2">
-                <h4 className="text-xs font-semibold text-orange-500 mb-1.5">Selected Range</h4>
+              <div className="border-t border-blue-800/50 pt-2">
+                <h4 className="text-xs font-semibold text-blue-300 mb-1.5">Selected Range</h4>
                 <div className="space-y-1 text-[11px]">
                   <div className="flex justify-between items-center">
-                    <span className="text-orange-600">Start:</span>
-                    <span className="text-gray-900 font-mono">{new Date(timestamps[0]).toISOString().slice(0, 10)}</span>
+                    <span className="text-blue-400">Start:</span>
+                    <span className="text-white font-mono">{new Date(timestamps[0]).toISOString().slice(0, 10)}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-orange-600">End:</span>
-                    <span className="text-gray-900 font-mono">{new Date(timestamps[timestamps.length - 1]).toISOString().slice(0, 10)}</span>
+                    <span className="text-blue-400">End:</span>
+                    <span className="text-white font-mono">{new Date(timestamps[timestamps.length - 1]).toISOString().slice(0, 10)}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-orange-600">Total Bars:</span>
-                    <span className="text-gray-900 font-mono">{timestamps.length}</span>
+                    <span className="text-blue-400">Total Bars:</span>
+                    <span className="text-white font-mono">{timestamps.length}</span>
                   </div>
                   {startBar !== undefined && (
                     <div className="flex justify-between items-center">
-                      <span className="text-orange-600">Bar Range:</span>
-                      <span className="text-gray-900 font-mono text-[10px]">
+                      <span className="text-blue-400">Bar Range:</span>
+                      <span className="text-white font-mono text-[10px]">
                         {startBar} → {startBar + timestamps.length - 1}
                       </span>
                     </div>
                   )}
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-orange-700/50">
-                <p className="text-[10px] text-orange-500">
+              <div className="mt-2 pt-2 border-t border-blue-800/50">
+                <p className="text-[10px] text-blue-300">
                   ✓ Trades can only be placed within this range
                 </p>
               </div>
@@ -895,37 +895,37 @@ export default function ManualMode({
           )}
 
           {/* Portfolio Stats */}
-          <div className="rounded-xl border border-orange-200 bg-gradient-to-br from-gray-900/80 to-gray-950/80 p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Portfolio</h3>
+          <div className="rounded-xl border border-gray-800 bg-gradient-to-br from-gray-900/80 to-gray-950/80 p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">Portfolio</h3>
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-600">Initial Equity</span>
-                <span className="text-sm font-mono font-semibold text-gray-700">
+                <span className="text-xs text-gray-400">Initial Equity</span>
+                <span className="text-sm font-mono font-semibold text-gray-300">
                   ${initialCash.toFixed(2)}
                 </span>
               </div>
               <div className="h-px bg-gray-700 my-2"></div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-600">Current Cash</span>
+                <span className="text-xs text-gray-400">Current Cash</span>
                 <span className={`text-sm font-mono font-semibold ${cash < initialCash * 0.1 ? 'text-red-400' : 'text-green-400'}`}>
                   ${cash.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-600">Position Value</span>
-                <span className="text-sm font-mono font-semibold text-orange-600">
+                <span className="text-xs text-gray-400">Position Value</span>
+                <span className="text-sm font-mono font-semibold text-blue-400">
                   ${hoveredIndex !== null && prices[hoveredIndex] ? ((typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex]).toFixed(2) : '0.00'}
                 </span>
               </div>
               <div className="h-px bg-gray-700 my-2"></div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-600 font-semibold">Current Total Equity</span>
-                <span className="text-base font-mono font-bold text-gray-900">
+                <span className="text-xs text-gray-400 font-semibold">Current Total Equity</span>
+                <span className="text-base font-mono font-bold text-white">
                   ${(cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-600">Total P&L</span>
+                <span className="text-xs text-gray-400">Total P&L</span>
                 <span className={`text-sm font-mono font-semibold ${
                   (cash + (hoveredIndex !== null && prices[hoveredIndex] ? (typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex] : 0)) >= initialCash ? 'text-green-400' : 'text-red-400'
                 }`}>
@@ -937,16 +937,16 @@ export default function ManualMode({
           </div>
 
           {/* Trade Type Selector */}
-          <div className="rounded-xl border border-orange-200 bg-white/75 p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Trade Type</h3>
+          <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">Select Trade Type</h3>
             <div className="space-y-2">
               <button
                 onClick={() => setCurrentMode("buy_stock")}
                 disabled={!!pendingExit}
                 className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition ${
                   currentMode === "buy_stock"
-                    ? "bg-green-600 text-gray-900"
-                    : "border border-orange-300 text-gray-600 hover:text-gray-900"
+                    ? "bg-green-600 text-white"
+                    : "border border-gray-700 text-gray-400 hover:text-white"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 Buy Stock
@@ -956,8 +956,8 @@ export default function ManualMode({
                 disabled={!!pendingExit}
                 className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition ${
                   currentMode === "buy_call"
-                    ? "bg-orange-600 text-gray-900"
-                    : "border border-orange-300 text-gray-600 hover:text-gray-900"
+                    ? "bg-blue-600 text-white"
+                    : "border border-gray-700 text-gray-400 hover:text-white"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 Buy Call Option
@@ -967,8 +967,8 @@ export default function ManualMode({
                 disabled={!!pendingExit}
                 className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition ${
                   currentMode === "buy_put"
-                    ? "bg-orange-600 text-gray-900"
-                    : "border border-orange-300 text-gray-600 hover:text-gray-900"
+                    ? "bg-orange-600 text-white"
+                    : "border border-gray-700 text-gray-400 hover:text-white"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 Buy Put Option
@@ -976,7 +976,7 @@ export default function ManualMode({
             </div>
 
             <div className="mt-4">
-              <label className="block text-xs text-gray-600 mb-1">
+              <label className="block text-xs text-gray-400 mb-1">
                 Quantity {currentMode.includes("stock") ? "(shares)" : "(contracts)"}
               </label>
               <input
@@ -1013,37 +1013,37 @@ export default function ManualMode({
                     setQuantity(1);
                   }
                 }}
-                className="w-full rounded border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900 mb-2"
+                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white mb-2"
               />
               {hoveredIndex !== null && prices[hoveredIndex] && currentMode.includes("buy") && (
                 <>
                   <div className="flex gap-1 mb-2">
                     <button
                       onClick={() => setQuantity(Math.floor((cash * 0.25) / prices[hoveredIndex!]))}
-                      className="flex-1 text-[10px] px-2 py-1 rounded bg-orange-50 text-gray-700 hover:bg-gray-700 border border-orange-300"
+                      className="flex-1 text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
                     >
                       25%
                     </button>
                     <button
                       onClick={() => setQuantity(Math.floor((cash * 0.5) / prices[hoveredIndex!]))}
-                      className="flex-1 text-[10px] px-2 py-1 rounded bg-orange-50 text-gray-700 hover:bg-gray-700 border border-orange-300"
+                      className="flex-1 text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
                     >
                       50%
                     </button>
                     <button
                       onClick={() => setQuantity(Math.floor((cash * 0.75) / prices[hoveredIndex!]))}
-                      className="flex-1 text-[10px] px-2 py-1 rounded bg-orange-50 text-gray-700 hover:bg-gray-700 border border-orange-300"
+                      className="flex-1 text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
                     >
                       75%
                     </button>
                     <button
                       onClick={() => setQuantity(Math.floor(cash / prices[hoveredIndex!]))}
-                      className="flex-1 text-[10px] px-2 py-1 rounded bg-green-700 text-gray-900 hover:bg-green-600 border border-green-600"
+                      className="flex-1 text-[10px] px-2 py-1 rounded bg-green-700 text-white hover:bg-green-600 border border-green-600"
                     >
                       MAX
                     </button>
                   </div>
-                  <div className="text-[10px] text-gray-9000 flex justify-between">
+                  <div className="text-[10px] text-gray-500 flex justify-between">
                     <span>Cost: ${((typeof quantity === 'number' ? quantity : 0) * prices[hoveredIndex!]).toFixed(2)}</span>
                     <span>Max: {Math.floor(cash / prices[hoveredIndex!])} shares</span>
                   </div>
@@ -1055,7 +1055,7 @@ export default function ManualMode({
                 </>
               )}
               {(hoveredIndex === null || !prices[hoveredIndex]) && prices.length > 0 && currentMode.includes("buy") && (
-                <div className="text-[10px] text-gray-9000 mt-1">
+                <div className="text-[10px] text-gray-500 mt-1">
                   Available cash: ${cash.toFixed(2)}
                 </div>
               )}
@@ -1063,12 +1063,12 @@ export default function ManualMode({
           </div>
 
           {/* Trade List */}
-          <div className="rounded-xl border border-orange-200 bg-white/75 p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Your Trades ({trades.length})</h3>
+          <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">Your Trades ({trades.length})</h3>
             <div className="space-y-2 max-h-96 overflow-y-auto scrollbar-hide">
               {trades.map((trade) => (
                 <div key={trade.id} className={`rounded border p-2 ${
-                  trade.isOpen ? 'border-orange-600 bg-orange-950/30' : 'border-orange-300 bg-orange-50'
+                  trade.isOpen ? 'border-orange-600 bg-orange-950/30' : 'border-gray-700 bg-gray-800'
                 }`}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -1078,17 +1078,17 @@ export default function ManualMode({
                             trade.type === "stock" ? "bg-green-400" : trade.type === "call" ? "bg-blue-400" : "bg-orange-400"
                           }`}
                         />
-                        <span className="text-xs font-semibold text-gray-900">
+                        <span className="text-xs font-semibold text-white">
                           BUY {trade.quantity}{" "}
                           {trade.type === "stock" ? "shares" : `${trade.type.toUpperCase()} contracts`}
                         </span>
                         {trade.isOpen && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-600 text-gray-900 font-bold">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-600 text-white font-bold">
                             OPEN
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-600 mt-1">
+                      <div className="text-xs text-gray-400 mt-1">
                         Entry: ${trade.price.toFixed(2)} on {formatDate(trade.timestamp)}
                       </div>
                       {trade.exitPrice && (
@@ -1100,12 +1100,12 @@ export default function ManualMode({
                         </div>
                       )}
                       {trade.type !== "stock" && (
-                        <div className="text-xs text-gray-9000">
+                        <div className="text-xs text-gray-500">
                           Strike ${trade.strike}, Exp {trade.expiry}
                         </div>
                       )}
                       {(trade.stopLoss || trade.takeProfit) && (
-                        <div className="text-[10px] text-gray-9000 mt-1">
+                        <div className="text-[10px] text-gray-500 mt-1">
                           {trade.stopLoss && `SL: $${trade.stopLoss.toFixed(2)}`}
                           {trade.stopLoss && trade.takeProfit && ' | '}
                           {trade.takeProfit && `TP: $${trade.takeProfit.toFixed(2)}`}
@@ -1115,7 +1115,7 @@ export default function ManualMode({
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleEditTrade(trade)}
-                        className="text-xs text-orange-600 hover:text-orange-500 font-semibold"
+                        className="text-xs text-blue-400 hover:text-blue-300 font-semibold"
                         title="Edit trade"
                       >
                         Edit
@@ -1132,7 +1132,7 @@ export default function ManualMode({
                 </div>
               ))}
               {trades.length === 0 && (
-                <div className="text-center text-xs text-gray-9000 py-8">
+                <div className="text-center text-xs text-gray-500 py-8">
                   Click on the chart to place trades
                 </div>
               )}
@@ -1157,17 +1157,17 @@ export default function ManualMode({
                 }
               }}
               disabled={trades.length === 0}
-              className="w-full rounded-xl border border-orange-300 bg-white py-2 text-sm font-semibold text-gray-900 transition hover:bg-orange-50 disabled:opacity-50"
+              className="w-full rounded-xl border border-gray-700 bg-gray-900 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:opacity-50"
             >
               Clear All Trades
             </button>
 
-            <div className="pt-4 border-t border-orange-200">
+            <div className="pt-4 border-t border-gray-800">
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setShowSaveConfigModal(true)}
                   disabled={trades.length === 0}
-                  className="rounded-lg border border-orange-600 bg-orange-50/30 px-3 py-2 text-xs font-semibold text-orange-600 transition hover:bg-orange-50/50 disabled:opacity-50"
+                  className="rounded-lg border border-blue-700 bg-blue-950/30 px-3 py-2 text-xs font-semibold text-blue-400 transition hover:bg-blue-950/50 disabled:opacity-50"
                 >
                   Save Config
                 </button>
@@ -1180,7 +1180,7 @@ export default function ManualMode({
                 </button>
               </div>
               {savedConfigurations.length > 0 && (
-                <p className="text-[10px] text-gray-9000 mt-2 text-center">
+                <p className="text-[10px] text-gray-500 mt-2 text-center">
                   {savedConfigurations.length} saved configuration{savedConfigurations.length !== 1 ? 's' : ''}
                 </p>
               )}
@@ -1191,9 +1191,9 @@ export default function ManualMode({
         {/* Right Panel - Chart and Results */}
         <div className="space-y-6">
           {/* Interactive Chart */}
-          <div className="rounded-xl border border-orange-200 bg-white/75 p-4">
+          <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-gray-900">
+              <h3 className="text-sm font-semibold text-white">
                 {pendingExit
                   ? `${symbol} Price Chart - Click to Set EXIT Point`
                   : `${symbol} Price Chart - Click to Place Entry`}
@@ -1206,13 +1206,13 @@ export default function ManualMode({
                 />
                 <button
                   onClick={handleChartReset}
-                  className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:border-white hover:text-gray-900"
+                  className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-400 transition hover:border-white hover:text-white"
                 >
                   Reset Zoom
                 </button>
                 <button
                   onClick={() => setShowHelpModal(true)}
-                  className="rounded-lg border border-orange-300 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:border-orange-400 hover:text-orange-600"
+                  className="rounded-lg border border-gray-700 px-2 py-1.5 text-xs font-semibold text-gray-400 transition hover:border-blue-500 hover:text-blue-400"
                   title="How to use"
                 >
                   ?
@@ -1366,14 +1366,14 @@ export default function ManualMode({
               />
               </div>
             )}
-            <p className="mt-3 text-xs text-gray-9000 text-center">
+            <p className="mt-3 text-xs text-gray-500 text-center">
               {pendingExit ? (
                 <span className="text-orange-400 font-semibold">
                   ⚠️ Waiting for EXIT point - Click chart or use modal to set exit
                 </span>
               ) : (
                 <>
-                  Currently placing: <span className="font-semibold text-gray-900">{currentMode.replace("_", " ").toUpperCase()}</span>
+                  Currently placing: <span className="font-semibold text-white">{currentMode.replace("_", " ").toUpperCase()}</span>
                 </>
               )}
             </p>
@@ -1381,20 +1381,20 @@ export default function ManualMode({
 
           {/* Results */}
           {result && result.manual_stats && (
-            <div className="rounded-xl border border-orange-200 bg-white/75 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Simulation Results</h3>
+            <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+              <h3 className="text-sm font-semibold text-white mb-4">Simulation Results</h3>
 
               {/* Equity Summary */}
-              <div className="mb-4 rounded-lg border-2 border-orange-600 bg-orange-50/30 p-4">
+              <div className="mb-4 rounded-lg border-2 border-blue-700 bg-blue-950/30 p-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="text-xs text-orange-600 font-semibold mb-1">Initial Equity</div>
-                    <div className="text-lg font-mono font-bold text-gray-900">
+                    <div className="text-xs text-blue-400 font-semibold mb-1">Initial Equity</div>
+                    <div className="text-lg font-mono font-bold text-white">
                       ${initialCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-orange-600 font-semibold mb-1">Final Equity</div>
+                    <div className="text-xs text-blue-400 font-semibold mb-1">Final Equity</div>
                     <div className={`text-lg font-mono font-bold ${
                       (initialCash + result.manual_stats.net_pnl) >= initialCash ? "text-green-400" : "text-red-400"
                     }`}>
@@ -1402,9 +1402,9 @@ export default function ManualMode({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-orange-700">
+                <div className="mt-3 pt-3 border-t border-blue-800">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs text-orange-500 font-semibold">Total Change</span>
+                    <span className="text-xs text-blue-300 font-semibold">Total Change</span>
                     <span className={`text-base font-mono font-bold ${
                       result.manual_stats.net_pnl >= 0 ? "text-green-400" : "text-red-400"
                     }`}>
@@ -1415,8 +1415,8 @@ export default function ManualMode({
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded border border-orange-300 bg-orange-50 p-3">
-                  <div className="text-xs text-gray-600">Net P&L</div>
+                <div className="rounded border border-gray-700 bg-gray-800 p-3">
+                  <div className="text-xs text-gray-400">Net P&L</div>
                   <div
                     className={`text-xl font-bold ${
                       result.manual_stats.net_pnl >= 0 ? "text-green-400" : "text-red-400"
@@ -1425,30 +1425,30 @@ export default function ManualMode({
                     ${result.manual_stats.net_pnl.toFixed(2)}
                   </div>
                 </div>
-                <div className="rounded border border-orange-300 bg-orange-50 p-3">
-                  <div className="text-xs text-gray-600">Win Rate</div>
-                  <div className="text-xl font-bold text-gray-900">
+                <div className="rounded border border-gray-700 bg-gray-800 p-3">
+                  <div className="text-xs text-gray-400">Win Rate</div>
+                  <div className="text-xl font-bold text-white">
                     {(result.manual_stats.win_rate * 100).toFixed(1)}%
                   </div>
                 </div>
-                <div className="rounded border border-orange-300 bg-orange-50 p-3">
-                  <div className="text-xs text-gray-600">Total Trades</div>
-                  <div className="text-lg font-semibold text-gray-900">{result.manual_stats.num_trades}</div>
+                <div className="rounded border border-gray-700 bg-gray-800 p-3">
+                  <div className="text-xs text-gray-400">Total Trades</div>
+                  <div className="text-lg font-semibold text-white">{result.manual_stats.num_trades}</div>
                 </div>
-                <div className="rounded border border-orange-300 bg-orange-50 p-3">
-                  <div className="text-xs text-gray-600">Return on Capital</div>
-                  <div className="text-lg font-semibold text-gray-900">
+                <div className="rounded border border-gray-700 bg-gray-800 p-3">
+                  <div className="text-xs text-gray-400">Return on Capital</div>
+                  <div className="text-lg font-semibold text-white">
                     {(result.manual_stats.return_on_capital * 100).toFixed(1)}%
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-gray-600">Trade Results</h4>
+                <h4 className="text-xs font-semibold text-gray-400">Trade Results</h4>
                 {result.simulated_trades?.map((trade: any, i: number) => (
-                  <div key={i} className="rounded border border-orange-300 bg-orange-50 p-2 text-xs">
+                  <div key={i} className="rounded border border-gray-700 bg-gray-800 p-2 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-gray-700">Trade {i + 1}</span>
+                      <span className="text-gray-300">Trade {i + 1}</span>
                       <span className={trade.payoff >= 0 ? "text-green-400" : "text-red-400"}>
                         ${trade.payoff.toFixed(2)}
                       </span>
@@ -1470,9 +1470,9 @@ export default function ManualMode({
       {/* Exit Strategy Modal */}
       {showExitModal && pendingExit && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-orange-300 max-w-xl w-full p-6 space-y-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-xl w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Set Exit Strategy</h3>
+              <h3 className="text-lg font-semibold text-white">Set Exit Strategy</h3>
               <button
                 onClick={() => {
                   setPendingExit(null);
@@ -1482,17 +1482,17 @@ export default function ManualMode({
                   setExitDate("");
                   setExitDaysInAdvance(null);
                 }}
-                className="text-gray-600 hover:text-gray-900 text-2xl"
+                className="text-gray-400 hover:text-white text-2xl"
               >
                 ×
               </button>
             </div>
 
-            <div className="rounded-lg border border-orange-800/50 bg-orange-50/30 p-3">
-              <p className="text-sm text-orange-500">
+            <div className="rounded-lg border border-blue-900/50 bg-blue-950/30 p-3">
+              <p className="text-sm text-blue-300">
                 <strong>Entry:</strong> {pendingExit.type.toUpperCase()} @ ${pendingExit.price.toFixed(2)} on {formatDate(pendingExit.timestamp)}
               </p>
-              <p className="text-xs text-orange-600 mt-1">
+              <p className="text-xs text-blue-400 mt-1">
                 Choose your exit strategy: click on the chart OR use the date picker below
               </p>
             </div>
@@ -1502,20 +1502,20 @@ export default function ManualMode({
               <div className={`rounded-lg border p-3 ${
                 ((pendingExit.price * pendingExit.quantity / initialCash) * 100) > 25
                   ? 'border-orange-700 bg-orange-950/30'
-                  : 'border-orange-300 bg-orange-50/50'
+                  : 'border-gray-700 bg-gray-800/50'
               }`}>
-                <h4 className="text-xs font-semibold text-gray-700 mb-2">Position Size</h4>
+                <h4 className="text-xs font-semibold text-gray-300 mb-2">Position Size</h4>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-gray-600">Cost:</span>
-                    <span className="ml-2 text-gray-900 font-mono">${(pendingExit.price * pendingExit.quantity).toFixed(2)}</span>
+                    <span className="text-gray-400">Cost:</span>
+                    <span className="ml-2 text-white font-mono">${(pendingExit.price * pendingExit.quantity).toFixed(2)}</span>
                   </div>
                   <div>
-                    <span className="text-gray-600">% of Portfolio:</span>
+                    <span className="text-gray-400">% of Portfolio:</span>
                     <span className={`ml-2 font-mono font-semibold ${
                       ((pendingExit.price * pendingExit.quantity / initialCash) * 100) > 25
                         ? 'text-orange-400'
-                        : 'text-gray-900'
+                        : 'text-white'
                     }`}>
                       {((pendingExit.price * pendingExit.quantity / initialCash) * 100).toFixed(1)}%
                     </span>
@@ -1530,7 +1530,7 @@ export default function ManualMode({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     Days in Advance
                   </label>
                   <input
@@ -1548,14 +1548,14 @@ export default function ManualMode({
                         setExitDate(futureDate.toISOString().split("T")[0]);
                       }
                     }}
-                    className="w-full rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-500"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500"
                   />
-                  <p className="text-xs text-gray-9000 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     Exit {exitDaysInAdvance || '?'} days after entry
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     Exit Date (Optional)
                   </label>
                   <input
@@ -1573,9 +1573,9 @@ export default function ManualMode({
                       }
                     }}
                     min={new Date(pendingExit.timestamp).toISOString().split("T")[0]}
-                    className="w-full rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
                   />
-                  <p className="text-xs text-gray-9000 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     Or click on chart
                   </p>
                 </div>
@@ -1583,7 +1583,7 @@ export default function ManualMode({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     Stop Loss
                   </label>
                   <input
@@ -1592,7 +1592,7 @@ export default function ManualMode({
                     placeholder={`${(pendingExit.price * 0.95).toFixed(2)}`}
                     value={stopLoss ?? ""}
                     onChange={(e) => setStopLoss(e.target.value ? parseFloat(e.target.value) : null)}
-                    className="w-full rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-500"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500"
                   />
                   {stopLoss && stopLoss < pendingExit.price && (
                     <p className="text-[10px] text-red-400 mt-1">
@@ -1603,7 +1603,7 @@ export default function ManualMode({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
                     Take Profit
                   </label>
                   <input
@@ -1612,7 +1612,7 @@ export default function ManualMode({
                     placeholder={`${(pendingExit.price * 1.1).toFixed(2)}`}
                     value={takeProfit ?? ""}
                     onChange={(e) => setTakeProfit(e.target.value ? parseFloat(e.target.value) : null)}
-                    className="w-full rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-500"
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500"
                   />
                   {takeProfit && takeProfit > pendingExit.price && (
                     <p className="text-[10px] text-green-400 mt-1">
@@ -1625,9 +1625,9 @@ export default function ManualMode({
 
               {/* Risk/Reward Ratio */}
               {stopLoss && takeProfit && stopLoss < pendingExit.price && takeProfit > pendingExit.price && (
-                <div className="rounded-lg border border-orange-600 bg-orange-50/30 p-3">
+                <div className="rounded-lg border border-blue-700 bg-blue-950/30 p-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-orange-500">Risk/Reward Ratio:</span>
+                    <span className="text-xs font-semibold text-blue-300">Risk/Reward Ratio:</span>
                     <span className={`text-sm font-bold ${
                       ((takeProfit - pendingExit.price) / (pendingExit.price - stopLoss)) >= 2
                         ? 'text-green-400'
@@ -1638,7 +1638,7 @@ export default function ManualMode({
                       1:{((takeProfit - pendingExit.price) / (pendingExit.price - stopLoss)).toFixed(2)}
                     </span>
                   </div>
-                  <p className="text-[10px] text-orange-600 mt-1">
+                  <p className="text-[10px] text-blue-400 mt-1">
                     {((takeProfit - pendingExit.price) / (pendingExit.price - stopLoss)) >= 2
                       ? '✓ Excellent risk/reward ratio'
                       : ((takeProfit - pendingExit.price) / (pendingExit.price - stopLoss)) >= 1
@@ -1693,7 +1693,7 @@ export default function ManualMode({
                     setTimeout(() => setError(null), 3000);
                   }
                 }}
-                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-gray-900 hover:bg-green-700 transition"
+                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 transition"
               >
                 Set Exit by Date
               </button>
@@ -1701,7 +1701,7 @@ export default function ManualMode({
                 onClick={() => {
                   setShowExitModal(false);
                 }}
-                className="flex-1 rounded-lg border border-orange-500 bg-orange-50/50 px-4 py-2.5 text-sm font-semibold text-orange-500 hover:bg-blue-900/50 transition"
+                className="flex-1 rounded-lg border border-blue-600 bg-blue-950/50 px-4 py-2.5 text-sm font-semibold text-blue-300 hover:bg-blue-900/50 transition"
               >
                 Click Chart Instead
               </button>
@@ -1713,22 +1713,22 @@ export default function ManualMode({
       {/* Save Configuration Modal */}
       {showSaveConfigModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-orange-300 max-w-md w-full p-6 space-y-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Save Configuration</h3>
+              <h3 className="text-lg font-semibold text-white">Save Configuration</h3>
               <button
                 onClick={() => {
                   setShowSaveConfigModal(false);
                   setConfigName("");
                 }}
-                className="text-gray-600 hover:text-gray-900 text-2xl"
+                className="text-gray-400 hover:text-white text-2xl"
               >
                 ×
               </button>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Configuration Name
               </label>
               <input
@@ -1736,7 +1736,7 @@ export default function ManualMode({
                 value={configName}
                 onChange={(e) => setConfigName(e.target.value)}
                 placeholder="e.g., Swing Trade Setup"
-                className="w-full rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-500"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     handleSaveConfiguration();
@@ -1745,8 +1745,8 @@ export default function ManualMode({
               />
             </div>
 
-            <div className="rounded-lg border border-orange-800/50 bg-orange-50/30 p-3">
-              <p className="text-xs text-orange-500">
+            <div className="rounded-lg border border-blue-900/50 bg-blue-950/30 p-3">
+              <p className="text-xs text-blue-300">
                 This will save {trades.length} trade{trades.length !== 1 ? 's' : ''} for <strong>{datasetName}</strong>
               </p>
             </div>
@@ -1757,14 +1757,14 @@ export default function ManualMode({
                   setShowSaveConfigModal(false);
                   setConfigName("");
                 }}
-                className="flex-1 rounded-lg border border-orange-300 bg-orange-50 px-4 py-2.5 text-sm font-semibold text-gray-900 hover:bg-gray-700 transition"
+                className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-700 transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveConfiguration}
                 disabled={!configName.trim()}
-                className="flex-1 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-gray-900 hover:bg-orange-700 transition disabled:opacity-50"
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition disabled:opacity-50"
               >
                 Save
               </button>
@@ -1776,12 +1776,12 @@ export default function ManualMode({
       {/* Load Configuration Modal */}
       {showLoadConfigModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-orange-300 max-w-2xl w-full p-6 space-y-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-2xl w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Load Configuration</h3>
+              <h3 className="text-lg font-semibold text-white">Load Configuration</h3>
               <button
                 onClick={() => setShowLoadConfigModal(false)}
-                className="text-gray-600 hover:text-gray-900 text-2xl"
+                className="text-gray-400 hover:text-white text-2xl"
               >
                 ×
               </button>
@@ -1791,15 +1791,15 @@ export default function ManualMode({
               {savedConfigurations.map((config) => (
                 <div
                   key={config.id}
-                  className="rounded-lg border border-orange-300 bg-orange-50/50 p-4 hover:bg-orange-50 transition"
+                  className="rounded-lg border border-gray-700 bg-gray-800/50 p-4 hover:bg-gray-800 transition"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h4 className="text-sm font-semibold text-gray-900">{config.name}</h4>
-                      <p className="text-xs text-gray-600 mt-1">
+                      <h4 className="text-sm font-semibold text-white">{config.name}</h4>
+                      <p className="text-xs text-gray-400 mt-1">
                         {config.trades.length} trade{config.trades.length !== 1 ? 's' : ''} • {config.datasetName}
                       </p>
-                      <p className="text-xs text-gray-9000 mt-1">
+                      <p className="text-xs text-gray-500 mt-1">
                         Initial Cash: ${config.initialCash.toLocaleString()} • Saved {new Date(config.createdAt).toLocaleDateString()}
                       </p>
                     </div>
@@ -1827,7 +1827,7 @@ export default function ManualMode({
             </div>
 
             {savedConfigurations.length === 0 && (
-              <div className="text-center py-8 text-sm text-gray-9000">
+              <div className="text-center py-8 text-sm text-gray-500">
                 No saved configurations yet
               </div>
             )}
@@ -1838,27 +1838,27 @@ export default function ManualMode({
       {/* Help Modal */}
       {showHelpModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-orange-300 max-w-lg w-full p-6 space-y-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-700 max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">How to Use Fundamental Mode</h3>
+              <h3 className="text-lg font-semibold text-white">How to Use Fundamental Mode</h3>
               <button
                 onClick={() => setShowHelpModal(false)}
-                className="text-gray-600 hover:text-gray-900 text-2xl"
+                className="text-gray-400 hover:text-white text-2xl"
               >
                 ×
               </button>
             </div>
-            <ol className="text-sm text-gray-700 space-y-2 list-decimal list-inside">
-              <li>Select trade type (<span className="text-green-400">Buy Stock</span>, <span className="text-orange-600">Buy Call</span>, or <span className="text-orange-400">Buy Put</span>)</li>
-              <li><strong className="text-gray-900">Click</strong> on the chart where you want to <span className="text-green-400">ENTER</span> the trade</li>
+            <ol className="text-sm text-gray-300 space-y-2 list-decimal list-inside">
+              <li>Select trade type (<span className="text-green-400">Buy Stock</span>, <span className="text-blue-400">Buy Call</span>, or <span className="text-orange-400">Buy Put</span>)</li>
+              <li><strong className="text-white">Click</strong> on the chart where you want to <span className="text-green-400">ENTER</span> the trade</li>
               <li>Set your exit strategy: choose a date OR click the chart again for your <span className="text-red-400">EXIT</span> point</li>
               <li>Optional: Set stop loss and take profit levels for risk management</li>
-              <li>Use <strong className="text-gray-900">mouse wheel</strong> to zoom in/out</li>
-              <li>Click <span className="text-gray-900 font-semibold">"Run Simulation"</span> to see how your trades would have performed</li>
+              <li>Use <strong className="text-white">mouse wheel</strong> to zoom in/out</li>
+              <li>Click <span className="text-white font-semibold">"Run Simulation"</span> to see how your trades would have performed</li>
             </ol>
             <button
               onClick={() => setShowHelpModal(false)}
-              className="w-full mt-4 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-gray-900 hover:bg-orange-700 transition"
+              className="w-full mt-4 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition"
             >
               Got it
             </button>

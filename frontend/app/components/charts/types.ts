@@ -34,21 +34,21 @@ export interface ChartTheme {
 }
 
 export const DARK_THEME: ChartTheme = {
-  background: '#FFFFFF',
-  textColor: '#1F2937',
-  gridColor: '#FED7AA',
-  crosshairColor: '#EA580C',
-  upColor: '#15803D',    // Green
-  downColor: '#DC2626',  // Red
+  background: '#0D0D0D',
+  textColor: '#D9D9D9',
+  gridColor: '#2A2A2A',
+  crosshairColor: '#888888',
+  upColor: '#26A69A',    // Teal green
+  downColor: '#EF5350',  // Red
 }
 
 export const LIGHT_THEME: ChartTheme = {
   background: '#FFFFFF',
-  textColor: '#1F2937',
-  gridColor: '#FED7AA',
-  crosshairColor: '#EA580C',
-  upColor: '#15803D',
-  downColor: '#DC2626',
+  textColor: '#191919',
+  gridColor: '#E6E6E6',
+  crosshairColor: '#888888',
+  upColor: '#26A69A',
+  downColor: '#EF5350',
 }
 
 export interface CrosshairData {

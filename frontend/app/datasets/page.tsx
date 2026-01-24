@@ -461,23 +461,23 @@ export default function DatasetsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-white via-orange-50 to-orange-100 flex items-center justify-center">
-        <div className="text-gray-700">Loading datasets...</div>
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-gray-400">Loading datasets...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-orange-50 to-orange-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header */}
-      <nav className="border-b border-orange-200 backdrop-blur-sm bg-white/50">
+      <nav className="border-b border-white/5 backdrop-blur-sm bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="Prior Systems" className="h-12 w-auto" />
           </div>
           <button
             onClick={() => router.push("/dashboard")}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
           >
             ← Back
           </button>
@@ -488,14 +488,14 @@ export default function DatasetsPage() {
         {/* Page Header */}
         <div className="mb-12 flex items-start justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-3">Choose Your Dataset</h1>
-            <p className="text-lg text-gray-700">
+            <h1 className="text-4xl font-bold text-white mb-3">Choose Your Dataset</h1>
+            <p className="text-lg text-gray-400">
               Select a historical dataset to backtest your trading strategies against real market conditions.
             </p>
           </div>
           <button
             onClick={() => setShowDownloadModal(true)}
-            className="px-6 py-3 bg-orange-600 hover:bg-orange-500 text-white font-semibold rounded-lg transition-all duration-200 flex items-center gap-2 shadow-lg"
+            className="px-6 py-3 bg-white hover:bg-gray-200 text-black font-semibold rounded-lg transition-all duration-200 flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m0 0l-4-4m4 4l4-4" />

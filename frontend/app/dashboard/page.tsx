@@ -11,14 +11,14 @@ export default function DashboardPage() {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-orange-50 to-orange-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header */}
-      <header className="border-b border-orange-200 bg-white/50 backdrop-blur-xl">
+      <header className="border-b border-white/5 bg-slate-900/50 backdrop-blur-xl">
         <div className="max-w-[1800px] mx-auto px-10 py-8">
           <div className="flex items-center justify-between">
             <div className="space-y-2">
-              <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-              <p className="text-gray-600">Select a service to get started</p>
+              <h1 className="text-3xl font-bold text-white/90">Dashboard</h1>
+              <p className="text-slate-400">Select a service to get started</p>
             </div>
             {user && <UserDisplay email={user.email} />}
           </div>
@@ -113,23 +113,23 @@ function InfoSuiteCard() {
       <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-2xl opacity-0 group-hover:opacity-100 blur transition duration-500"></div>
 
       {/* Card Content */}
-      <div className="relative bg-white backdrop-blur-xl rounded-2xl border border-orange-200 p-8 h-full flex flex-col transition-all duration-300 hover:border-orange-400 hover:-translate-y-1 shadow-lg">
+      <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-blue-500/20 p-8 h-full flex flex-col transition-all duration-300 hover:border-blue-500/40 hover:-translate-y-1">
         {/* Icon */}
-        <div className="w-14 h-14 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center mb-6 text-orange-600 group-hover:scale-110 transition-transform duration-300">
+        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/20 flex items-center justify-center mb-6 text-blue-400 group-hover:scale-110 transition-transform duration-300">
           <FileText className="w-6 h-6" />
         </div>
 
         {/* Title */}
-        <h3 className="text-xl font-semibold text-gray-900 mb-3">Information Suite</h3>
+        <h3 className="text-xl font-semibold text-white/90 mb-3">Information Suite</h3>
 
         {/* Description */}
-        <p className="text-gray-600 text-sm leading-relaxed mb-4 h-20">
+        <p className="text-slate-400 text-sm leading-relaxed mb-4 h-20">
           Access comprehensive market data, reports, and analytics. Build comprehensive solutions for analysis from informed decisions.
         </p>
 
         {/* Badges */}
         <div className="flex flex-wrap gap-2 mb-4">
-          <span className="px-3 py-1 rounded-md border bg-orange-50 border-orange-300 text-gray-700 text-xs backdrop-blur-sm">
+          <span className="px-3 py-1 rounded-md border bg-slate-700/30 border-slate-600 text-slate-300 text-xs backdrop-blur-sm">
             Coming Soon
           </span>
         </div>
@@ -137,7 +137,7 @@ function InfoSuiteCard() {
         {/* Button */}
         <button
           disabled
-          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-gray-100 text-gray-400 border border-gray-300 cursor-not-allowed transition-all"
+          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-slate-800/50 text-slate-500 border border-slate-700/50 cursor-not-allowed hover:bg-slate-800/50 transition-all"
         >
           Not Available
         </button>
@@ -154,26 +154,26 @@ function BacktesterCard() {
       <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500/20 to-green-500/20 rounded-2xl opacity-0 group-hover:opacity-100 blur transition duration-500"></div>
 
       {/* Card Content */}
-      <div className="relative bg-white backdrop-blur-xl rounded-2xl border border-orange-200 p-8 h-full flex flex-col transition-all duration-300 hover:border-orange-400 hover:-translate-y-1 shadow-lg">
+      <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-emerald-500/20 p-8 h-full flex flex-col transition-all duration-300 hover:border-emerald-500/40 hover:-translate-y-1">
         {/* Icon */}
-        <div className="w-14 h-14 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center mb-6 text-orange-600 group-hover:scale-110 transition-transform duration-300">
+        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-500/20 to-green-500/20 border border-emerald-500/20 flex items-center justify-center mb-6 text-emerald-400 group-hover:scale-110 transition-transform duration-300">
           <TrendingUp className="w-6 h-6" />
         </div>
 
         {/* Title */}
-        <h3 className="text-xl font-semibold text-gray-900 mb-3">Backtester</h3>
+        <h3 className="text-xl font-semibold text-white/90 mb-3">Backtester</h3>
 
         {/* Description */}
-        <p className="text-gray-600 text-sm leading-relaxed mb-4 h-20">
+        <p className="text-slate-400 text-sm leading-relaxed mb-4 h-20">
           Test your trading strategies with historical data. Simulate both mechanical algorithms and manual fundamental analysis.
         </p>
 
         {/* Badges */}
         <div className="flex flex-wrap gap-2 mb-4">
-          <span className="px-3 py-1 rounded-md border bg-orange-50 border-orange-300 text-orange-700 text-xs backdrop-blur-sm">
+          <span className="px-3 py-1 rounded-md border bg-emerald-500/10 border-emerald-500/30 text-emerald-400 text-xs backdrop-blur-sm">
             Mechanical
           </span>
-          <span className="px-3 py-1 rounded-md border bg-orange-50 border-orange-300 text-orange-700 text-xs backdrop-blur-sm">
+          <span className="px-3 py-1 rounded-md border bg-blue-500/10 border-blue-500/30 text-blue-400 text-xs backdrop-blur-sm">
             Fundamental
           </span>
         </div>
@@ -181,7 +181,7 @@ function BacktesterCard() {
         {/* Button */}
         <Link
           href="/data-selection?entry=dashboard"
-          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-center transition-all duration-300 hover:shadow-lg"
+          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-center transition-all duration-300 hover:shadow-lg hover:shadow-emerald-500/50"
         >
           Launch Backtester →
         </Link>
@@ -198,26 +198,26 @@ function LivePricesCard() {
       <div className="absolute -inset-0.5 bg-gradient-to-r from-orange-500/20 to-amber-500/20 rounded-2xl opacity-0 group-hover:opacity-100 blur transition duration-500"></div>
 
       {/* Card Content */}
-      <div className="relative bg-white backdrop-blur-xl rounded-2xl border border-orange-200 p-8 h-full flex flex-col transition-all duration-300 hover:border-orange-400 hover:-translate-y-1 shadow-lg">
+      <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-orange-500/20 p-8 h-full flex flex-col transition-all duration-300 hover:border-orange-500/40 hover:-translate-y-1">
         {/* Icon */}
-        <div className="w-14 h-14 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center mb-6 text-orange-600 group-hover:scale-110 transition-transform duration-300">
+        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 border border-orange-500/20 flex items-center justify-center mb-6 text-orange-400 group-hover:scale-110 transition-transform duration-300">
           <Activity className="w-6 h-6" />
         </div>
 
         {/* Title */}
-        <h3 className="text-xl font-semibold text-gray-900 mb-3">Live Prices</h3>
+        <h3 className="text-xl font-semibold text-white/90 mb-3">Live Prices</h3>
 
         {/* Description */}
-        <p className="text-gray-600 text-sm leading-relaxed mb-4 h-20">
+        <p className="text-slate-400 text-sm leading-relaxed mb-4 h-20">
           Monitor real-time market data and price movements. View historical performance and analyze your holdings for your everyday buy and hold trades.
         </p>
 
         {/* Badges */}
         <div className="flex flex-wrap gap-2 mb-4">
-          <span className="px-3 py-1 rounded-md border bg-orange-50 border-orange-300 text-orange-700 text-xs backdrop-blur-sm">
+          <span className="px-3 py-1 rounded-md border bg-orange-500/10 border-orange-500/30 text-orange-400 text-xs backdrop-blur-sm">
             Real-time
           </span>
-          <span className="px-3 py-1 rounded-md border bg-orange-50 border-orange-300 text-orange-700 text-xs backdrop-blur-sm">
+          <span className="px-3 py-1 rounded-md border bg-amber-500/10 border-amber-500/30 text-amber-400 text-xs backdrop-blur-sm">
             Heatlist
           </span>
         </div>
@@ -225,7 +225,7 @@ function LivePricesCard() {
         {/* Button */}
         <Link
           href="/live-prices"
-          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-center transition-all duration-300 hover:shadow-lg"
+          className="mt-auto w-full px-6 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-center transition-all duration-300 hover:shadow-lg hover:shadow-orange-500/50"
         >
           View Live Prices →
         </Link>
@@ -244,17 +244,17 @@ function InfoSuiteAnimation() {
   ];
 
   return (
-    <div className="bg-white backdrop-blur-xl rounded-2xl border border-orange-200 p-8 h-[420px] relative overflow-hidden animate-slide-in opacity-0 shadow-lg" style={{ animationDelay: '0.4s' }}>
+    <div className="bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-blue-500/20 p-8 h-[420px] relative overflow-hidden animate-slide-in opacity-0" style={{ animationDelay: '0.4s' }}>
       {/* Background Grid */}
       <div className="absolute inset-0 opacity-10" style={{
-        backgroundImage: 'linear-gradient(rgba(234, 88, 12, 0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(234, 88, 12, 0.5) 1px, transparent 1px)',
+        backgroundImage: 'linear-gradient(rgba(59, 130, 246, 0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 130, 246, 0.5) 1px, transparent 1px)',
         backgroundSize: '40px 40px'
       }}></div>
 
       {/* Title */}
       <div className="relative mb-6">
-        <h4 className="text-lg font-semibold text-orange-600">Information Flow</h4>
-        <p className="text-gray-500 text-sm mt-1">Data aggregation & analysis</p>
+        <h4 className="text-lg font-semibold text-blue-400">Information Flow</h4>
+        <p className="text-slate-500 text-sm mt-1">Data aggregation & analysis</p>
       </div>
 
       {/* Central Hub */}

@@ -50,24 +50,24 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+    <div className="min-h-screen bg-gradient-to-b from-white via-orange-50 to-orange-100">
       {/* Navigation */}
-      <nav className="fixed top-0 w-full border-b border-white/5 backdrop-blur-xl bg-slate-950/30 z-50">
+      <nav className="fixed top-0 w-full border-b border-orange-200 backdrop-blur-xl bg-white/80 z-50">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex h-20 items-center justify-between">
             <div className="flex items-center gap-3">
               <img src="/logo-white-full.svg" alt="Prior Systems" className="h-12 w-auto" />
             </div>
             <div className="flex items-center gap-8">
-              <a href="#platform" className="text-sm text-slate-400 hover:text-white transition-colors">
+              <a href="#platform" className="text-sm text-gray-700 hover:text-gray-900 transition-colors">
                 Platform
               </a>
-              <a href="#features" className="text-sm text-slate-400 hover:text-white transition-colors">
+              <a href="#features" className="text-sm text-gray-700 hover:text-gray-900 transition-colors">
                 Features
               </a>
               <button
                 onClick={handleGetStarted}
-                className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm text-white hover:bg-blue-700 transition-colors"
+                className="rounded-lg bg-orange-600 px-5 py-2.5 text-sm text-white hover:bg-orange-500 transition-colors shadow-lg"
               >
                 Get Started
               </button>
@@ -89,13 +89,13 @@ export default function HomePage() {
       <CTA onGetStarted={handleGetStarted} />
 
       {/* Footer */}
-      <footer className="border-t border-white/5 py-16 bg-slate-950">
+      <footer className="border-t border-orange-200 py-16 bg-white">
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img src="/logo-white-full.svg" alt="Prior Systems" className="h-10 w-auto" />
             </div>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-gray-600">
               © {new Date().getFullYear()} Prior Systems.
             </p>
           </div>
@@ -231,8 +231,8 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             </p>
 
             <button
-              onClick={onGetStarted}i
-              className="group inline-flex items-center gap-3 rounded-lg bg-blue-600 px-8 py-4 text-white transition-all hover:bg-blue-700 hover:gap-4"
+              onClick={onGetStarted}
+              className="group inline-flex items-center gap-3 rounded-lg bg-orange-600 px-8 py-4 text-white transition-all hover:bg-orange-500 hover:gap-4 shadow-lg"
             >
               <span className="text-lg">Start Backtesting</span>
               <ArrowRight className="h-5 w-5" />

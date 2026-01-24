@@ -594,8 +594,8 @@ function StrategySelect({ options, value, onSelect, disabled }: StrategySelectPr
         type="button"
         className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${
           disabled
-            ? "border-gray-800/80 bg-gray-900/50 text-gray-500"
-            : "border-gray-700 bg-gray-950 text-gray-100 hover:border-white/60"
+            ? "border-orange-200/80 bg-white/75 text-gray-9000"
+            : "border-orange-300 bg-white text-gray-900 hover:border-white/60"
         }`}
         onClick={toggle}
         aria-haspopup="listbox"
@@ -604,12 +604,12 @@ function StrategySelect({ options, value, onSelect, disabled }: StrategySelectPr
       >
         <div className="flex flex-col flex-1 min-w-0 pr-2">
           <span className="font-semibold">{active?.name ?? "Select strategy"}</span>
-          <span className="text-[11px] text-gray-500 truncate">
+          <span className="text-[11px] text-gray-9000 truncate">
             {active?.description ?? "Choose a preset strategy"}
           </span>
         </div>
         <svg
-          className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-4 w-4 flex-shrink-0 text-gray-600 transition-transform ${open ? "rotate-180" : ""}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -621,13 +621,13 @@ function StrategySelect({ options, value, onSelect, disabled }: StrategySelectPr
         </svg>
       </button>
       <div
-        className={`absolute left-0 right-0 top-[calc(100%+6px)] z-[9999] origin-top rounded-xl border border-gray-800/80 bg-gray-950/95 shadow-2xl backdrop-blur transition-all duration-150 ${
+        className={`absolute left-0 right-0 top-[calc(100%+6px)] z-[9999] origin-top rounded-xl border border-orange-200/80 bg-white/95 shadow-2xl backdrop-blur transition-all duration-150 ${
           open ? "pointer-events-auto opacity-100 translate-y-0 scale-100" : "pointer-events-none opacity-0 -translate-y-2 scale-95"
         }`}
       >
         <div className="max-h-64 overflow-y-auto py-2 scrollbar-hide">
           {options.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-gray-500">No built-in strategies available.</div>
+            <div className="px-4 py-6 text-center text-xs text-gray-9000">No built-in strategies available.</div>
           ) : (
             options.map((option) => {
               const selected = option.id === value;
@@ -636,12 +636,12 @@ function StrategySelect({ options, value, onSelect, disabled }: StrategySelectPr
                   key={option.id}
                   type="button"
                   className={`w-full px-4 py-2 text-left text-sm transition ${
-                    selected ? "bg-white/10 text-white" : "text-gray-200 hover:bg-white/5"
+                    selected ? "bg-white/10 text-gray-900" : "text-gray-800 hover:bg-white/5"
                   }`}
                   onClick={() => handleSelect(option.id)}
                 >
                   <div className="font-semibold">{option.name}</div>
-                  <div className="text-[11px] text-gray-400 break-words">{option.description}</div>
+                  <div className="text-[11px] text-gray-600 break-words">{option.description}</div>
                 </button>
               );
             })
@@ -674,24 +674,24 @@ class UserStrategy(Strategy):
 
 function KeyMetricCard({ label, value, accent = false, tooltip }: { label: string; value: string; accent?: boolean; tooltip?: string }) {
   return (
-    <div className={`rounded-lg border ${accent ? "border-white/30 bg-white/20" : "border-gray-700"} bg-gray-900 px-4 py-3`}>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+    <div className={`rounded-lg border ${accent ? "border-white/30 bg-white/20" : "border-orange-300"} bg-white px-4 py-3`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-600">
         {label}
         {tooltip && <InfoIcon tooltip={tooltip} />}
       </div>
-      <div className={`mt-1 text-2xl font-bold ${accent ? "text-white" : "text-gray-50"}`}>{value}</div>
+      <div className={`mt-1 text-2xl font-bold ${accent ? "text-gray-900" : "text-gray-900"}`}>{value}</div>
     </div>
   );
 }
 
 function SecondaryMetricRow({ label, value, tooltip }: { label: string; value: string; tooltip?: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-gray-800/50 py-2">
-      <span className="text-xs text-gray-400">
+    <div className="flex items-center justify-between border-b border-orange-200/50 py-2">
+      <span className="text-xs text-gray-600">
         {label}
         {tooltip && <InfoIcon tooltip={tooltip} />}
       </span>
-      <span className="text-sm font-semibold text-gray-200">{value}</span>
+      <span className="text-sm font-semibold text-gray-800">{value}</span>
     </div>
   );
 }
@@ -833,13 +833,13 @@ function InfoIcon({ tooltip }: { tooltip: string }) {
         type="button"
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-gray-600 text-[9px] text-gray-500 transition hover:border-gray-400 hover:text-gray-300"
+        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-gray-600 text-[9px] text-gray-9000 transition hover:border-gray-400 hover:text-gray-700"
         aria-label="More information"
       >
         ?
       </button>
       {showTooltip && (
-        <div className="pointer-events-none absolute bottom-full left-1/2 z-[99999] mb-2 w-48 -translate-x-1/2 whitespace-normal rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-[11px] leading-relaxed text-gray-300 shadow-xl">
+        <div className="pointer-events-none absolute bottom-full left-1/2 z-[99999] mb-2 w-48 -translate-x-1/2 whitespace-normal rounded-lg border border-orange-300 bg-white px-3 py-2 text-[11px] leading-relaxed text-gray-700 shadow-xl">
           {tooltip}
           <div className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-4 border-transparent border-t-gray-700" />
         </div>
@@ -2587,33 +2587,33 @@ function BacktestPageContent() {
 
   return (
     <>
-      <main className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 text-gray-100">
+      <main className="min-h-screen bg-gradient-to-br from-white via-orange-50 to-orange-100 text-gray-900">
         <div className="mx-auto max-w-[1920px] px-4 py-3 lg:px-8">
           {/* Compact Top Navigation with Mode Toggle */}
-          <header className="mb-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5 backdrop-blur-sm">
+          <header className="mb-4 rounded-xl border border-orange-200 bg-white/80 px-4 py-2.5 backdrop-blur-sm shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Link
                   href="/data-selection"
-                  className="px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+                  className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 transition-colors"
                 >
                   ← Back
                 </Link>
-                <div className="h-6 w-px bg-gray-700"></div>
+                <div className="h-6 w-px bg-orange-200"></div>
                 <img src="/logo-white-full.svg" alt="Prior Systems" className="h-7 w-auto" />
-                <div className="h-6 w-px bg-gray-700"></div>
-                <h1 className="text-lg font-bold tracking-tight text-gray-50">Backtest Console</h1>
+                <div className="h-6 w-px bg-orange-200"></div>
+                <h1 className="text-lg font-bold tracking-tight text-gray-900">Backtest Console</h1>
               </div>
 
               <div className="flex items-center gap-4">
                 {/* Trading Mode Toggle - Inline with Header */}
-                <div className="inline-flex rounded-lg border border-gray-800 bg-gray-900/60 p-0.5">
+                <div className="inline-flex rounded-lg border border-orange-200 bg-white/80 p-0.5">
                   <button
                     onClick={() => setTradingMode("mechanical")}
                     className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
                       tradingMode === "mechanical"
                         ? "bg-white text-black"
-                        : "text-gray-400 hover:text-white"
+                        : "text-gray-600 hover:text-gray-900"
                     }`}
                   >
                     Mechanical
@@ -2623,7 +2623,7 @@ function BacktestPageContent() {
                     className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${
                       tradingMode === "manual"
                         ? "bg-white text-black"
-                        : "text-gray-400 hover:text-white"
+                        : "text-gray-600 hover:text-gray-900"
                     }`}
                   >
                     Fundamental
@@ -2656,7 +2656,7 @@ function BacktestPageContent() {
             <button
               type="button"
               onClick={() => setConfigCollapsed((prev) => !prev)}
-              className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white hover:text-white"
+              className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-white hover:text-gray-900"
             >
               {configCollapsed ? "Show Configuration" : "Hide Configuration"}
             </button>
@@ -2680,13 +2680,13 @@ function BacktestPageContent() {
               >
                 {/* How to Use Mechanical Mode Guide - Moved to Top */}
                 {showMechanicalGuide && (
-                  <div className="rounded-xl border border-blue-800 bg-blue-950/30 p-3">
+                  <div className="rounded-xl border border-orange-700 bg-orange-50/30 p-3">
                     <div className="flex items-start justify-between gap-3 mb-2">
-                      <h3 className="text-xs font-bold text-blue-300">How to Use Mechanical Mode</h3>
+                      <h3 className="text-xs font-bold text-orange-500">How to Use Mechanical Mode</h3>
                       <button
                         type="button"
                         onClick={() => setShowMechanicalGuide(false)}
-                        className="text-blue-400 hover:text-white transition text-base leading-none"
+                        className="text-orange-600 hover:text-gray-900 transition text-base leading-none"
                         title="Dismiss guide"
                       >
                         ✕
@@ -2701,15 +2701,15 @@ function BacktestPageContent() {
                 )}
 
                 {/* Dataset Summary */}
-                <section className="rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm overflow-hidden">
+                <section className="rounded-xl border border-orange-200 bg-white/90 p-3 shadow-xl backdrop-blur-sm overflow-hidden">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-200">Dataset</h3>
+                        <h3 className="text-sm font-semibold text-gray-800">Dataset</h3>
                         {datasetLoading ? (
-                          <p className="mt-1 text-xs text-gray-500">Loading selected dataset…</p>
+                          <p className="mt-1 text-xs text-gray-9000">Loading selected dataset…</p>
                         ) : lockedDataset ? (
-                          <p className="mt-1 text-xs text-gray-400">{lockedDataset.name}</p>
+                          <p className="mt-1 text-xs text-gray-600">{lockedDataset.name}</p>
                         ) : (
                           <p className="mt-1 text-xs text-rose-400">
                             {datasetError ?? "No dataset selected. Choose one before running backtests."}
@@ -2722,14 +2722,14 @@ function BacktestPageContent() {
                         <button
                           type="button"
                           onClick={() => setShowDatasetInfo(!showDatasetInfo)}
-                          className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-200 transition hover:border-white hover:text-white"
+                          className="rounded-lg border border-orange-300 px-3 py-1.5 text-[11px] font-semibold text-gray-800 transition hover:border-white hover:text-gray-900"
                         >
                           {showDatasetInfo ? "Hide" : "Info"}
                         </button>
                       )}
                       <button
                         type="button"
-                        className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-200 transition hover:border-white hover:text-white"
+                        className="rounded-lg border border-orange-300 px-3 py-1.5 text-[11px] font-semibold text-gray-800 transition hover:border-white hover:text-gray-900"
                         onClick={() => router.push("/data-selection")}
                       >
                         Change
@@ -2745,19 +2745,19 @@ function BacktestPageContent() {
                       }`}
                     >
                       <div className="overflow-hidden">
-                        <div className="space-y-2 text-xs text-gray-300">
+                        <div className="space-y-2 text-xs text-gray-700">
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Symbol</span>
+                        <span className="text-gray-9000">Symbol</span>
                         <span className="font-semibold">
                           {deriveSymbolFromName(lockedDataset.name) || symbol}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Rows</span>
+                        <span className="text-gray-9000">Rows</span>
                         <span>{lockedDataset.rows ?? "—"}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">
+                        <span className="text-gray-9000">
                           {activeProfile ? "Selected Range" : "Dataset Range"}
                         </span>
                         <span>
@@ -2770,13 +2770,13 @@ function BacktestPageContent() {
                       </div>
                       {activeProfile && startBar !== undefined && maxBars !== undefined && (
                         <div className="flex items-center justify-between">
-                          <span className="text-gray-500">Backtest Range</span>
+                          <span className="text-gray-9000">Backtest Range</span>
                           <span className="font-mono text-[11px]">
                             Bar {startBar} to {startBar + maxBars - 1} ({maxBars} bars)
                           </span>
                         </div>
                       )}
-                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-2 font-mono text-[11px] text-gray-400 break-all">
+                      <div className="rounded-lg border border-orange-200 bg-white/60 p-2 font-mono text-[11px] text-gray-600 break-all">
                         {lockedDataset.path}
                       </div>
                         </div>
@@ -2784,30 +2784,30 @@ function BacktestPageContent() {
                     </div>
                   )}
                   {!datasetLoading && !lockedDataset && (
-                    <p className="mt-3 text-[11px] text-gray-400">
+                    <p className="mt-3 text-[11px] text-gray-600">
                       Please choose a dataset on the data selection page to unlock the backtest console.
                     </p>
                   )}
                 </section>
 
                 {/* Trading Parameters - Collapsible */}
-                <section className="relative z-10 rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm">
+                <section className="relative z-10 rounded-xl border border-orange-200 bg-white/90 p-3 shadow-xl backdrop-blur-sm">
                   <button
                     type="button"
                     onClick={() => setShowTradingParams(!showTradingParams)}
-                    className="flex w-full items-center justify-between text-xs font-semibold text-gray-200"
+                    className="flex w-full items-center justify-between text-xs font-semibold text-gray-800"
                   >
                     <span>Trading Parameters</span>
-                    <span className="text-gray-500">{showTradingParams ? "−" : "+"}</span>
+                    <span className="text-gray-9000">{showTradingParams ? "−" : "+"}</span>
                   </button>
                   <Collapse open={showTradingParams} className="mt-3 space-y-2.5">
                     <div className="grid grid-cols-2 gap-3">
                       <div className="col-span-2">
-                        <label className="block text-xs text-gray-400 mb-1">
+                        <label className="block text-xs text-gray-600 mb-1">
                           Initial Cash
                           <InfoIcon tooltip="Starting capital for the backtest. This is the total cash available to deploy." />
                           {activeProfile && (
-                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                            <span className="ml-2 text-[10px] text-orange-600">(Set in data-selection)</span>
                           )}
                         </label>
                         <div className="relative">
@@ -2817,10 +2817,10 @@ function BacktestPageContent() {
                             disabled={activeProfile !== null}
                             className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
                               activeProfile
-                                ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
+                                ? "border-orange-500 bg-orange-50/30 cursor-not-allowed opacity-75"
                                 : usingPortfolio
-                                ? "border-blue-600 bg-blue-950/30 focus:border-blue-500 focus:ring-blue-500/20 focus:ring-2"
-                                : "border-gray-700 bg-gray-950 focus:border-white focus:ring-white/20 focus:ring-2"
+                                ? "border-orange-500 bg-orange-50/30 focus:border-orange-400 focus:ring-blue-500/20 focus:ring-2"
+                                : "border-orange-300 bg-white focus:border-white focus:ring-white/20 focus:ring-2"
                             }`}
                             value={initialCashInput}
                             onChange={(e) => {
@@ -2840,13 +2840,13 @@ function BacktestPageContent() {
                             }}
                           />
                           {usingPortfolio && portfolioEquity !== null && (
-                            <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                            <div className="mt-1 flex items-center gap-1 text-[10px] text-orange-600">
                               <span>✓</span>
                               <span>Using portfolio equity: ${portfolioEquity.toLocaleString()}</span>
                             </div>
                           )}
                           {activeProfile && (
-                            <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                            <div className="mt-1 flex items-center gap-1 text-[10px] text-orange-600">
                               <span>✓</span>
                               <span>Initial equity from profile: ${activeProfile.initialEquity.toLocaleString()}</span>
                             </div>
@@ -2854,7 +2854,7 @@ function BacktestPageContent() {
                         </div>
                       </div>
                       <div className="col-span-2">
-                        <label className="mb-1 block text-xs text-gray-400">
+                        <label className="mb-1 block text-xs text-gray-600">
                           Shares per Trade
                           <InfoIcon tooltip="Number of shares to buy/sell in each trade. The strategy will use this quantity for position sizing." />
                         </label>
@@ -2862,7 +2862,7 @@ function BacktestPageContent() {
                           type="number"
                           min="1"
                           step="1"
-                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          className="w-full rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
                           value={quantity}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -2884,22 +2884,22 @@ function BacktestPageContent() {
                         {lockedDataset && datasetPrice !== null && (
                           <>
                             <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-                              <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
-                                <div className="text-gray-500">Price/Share</div>
-                                <div className="text-white font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
+                              <div className="rounded bg-orange-50 px-2 py-1.5 border border-orange-300">
+                                <div className="text-gray-9000">Price/Share</div>
+                                <div className="text-gray-900 font-mono mt-0.5">${datasetPrice.toFixed(2)}</div>
                               </div>
                               <div className={`rounded px-2 py-1.5 border ${
                                 (datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash
                                   ? 'bg-red-950/30 border-red-700'
-                                  : 'bg-gray-800 border-gray-700'
+                                  : 'bg-orange-50 border-orange-300'
                               }`}>
-                                <div className="text-gray-500">Position Cost</div>
+                                <div className="text-gray-9000">Position Cost</div>
                                 <div className={`font-mono mt-0.5 ${
-                                  (datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash ? 'text-red-400' : 'text-white'
+                                  (datasetPrice * (typeof quantity === 'number' ? quantity : 1)) > initialCash ? 'text-red-400' : 'text-gray-900'
                                 }`}>${(datasetPrice * (typeof quantity === 'number' ? quantity : 1)).toFixed(2)}</div>
                               </div>
-                              <div className="rounded bg-gray-800 px-2 py-1.5 border border-gray-700">
-                                <div className="text-gray-500">Max Shares</div>
+                              <div className="rounded bg-orange-50 px-2 py-1.5 border border-orange-300">
+                                <div className="text-gray-9000">Max Shares</div>
                                 <div className="text-green-400 font-mono mt-0.5">{Math.floor(initialCash / datasetPrice)}</div>
                               </div>
                             </div>
@@ -2912,11 +2912,11 @@ function BacktestPageContent() {
                         )}
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-gray-400">
+                        <label className="mb-1 block text-xs text-gray-600">
                           Start Bar
                           <InfoIcon tooltip="Bar index to start the backtest from. Set in data-selection page." />
                           {activeProfile && (
-                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                            <span className="ml-2 text-[10px] text-orange-600">(Set in data-selection)</span>
                           )}
                         </label>
                         <input
@@ -2924,8 +2924,8 @@ function BacktestPageContent() {
                           disabled={activeProfile !== null}
                           className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
                             activeProfile
-                              ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
-                              : "border-gray-700 bg-gray-950 focus:border-white focus:ring-2 focus:ring-white/20"
+                              ? "border-orange-500 bg-orange-50/30 cursor-not-allowed opacity-75"
+                              : "border-orange-300 bg-white focus:border-white focus:ring-2 focus:ring-white/20"
                           }`}
                           value={startBar ?? ""}
                           onChange={(e) =>
@@ -2936,18 +2936,18 @@ function BacktestPageContent() {
                           min="0"
                         />
                         {activeProfile && startBar !== undefined && (
-                          <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-orange-600">
                             <span>✓</span>
                             <span>Start bar from profile: {startBar}</span>
                           </div>
                         )}
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-gray-400">
+                        <label className="mb-1 block text-xs text-gray-600">
                           Max Bars
                           <InfoIcon tooltip="Number of bars in the selected range. Set in data-selection page." />
                           {activeProfile && (
-                            <span className="ml-2 text-[10px] text-blue-400">(Set in data-selection)</span>
+                            <span className="ml-2 text-[10px] text-orange-600">(Set in data-selection)</span>
                           )}
                         </label>
                         <input
@@ -2955,8 +2955,8 @@ function BacktestPageContent() {
                           disabled={activeProfile !== null}
                           className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none transition ${
                             activeProfile
-                              ? "border-blue-600 bg-blue-950/30 cursor-not-allowed opacity-75"
-                              : "border-gray-700 bg-gray-950 focus:border-white focus:ring-2 focus:ring-white/20"
+                              ? "border-orange-500 bg-orange-50/30 cursor-not-allowed opacity-75"
+                              : "border-orange-300 bg-white focus:border-white focus:ring-2 focus:ring-white/20"
                           }`}
                           value={maxBars ?? ""}
                           onChange={(e) =>
@@ -2966,21 +2966,21 @@ function BacktestPageContent() {
                           }
                         />
                         {activeProfile && maxBars !== undefined && (
-                          <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-400">
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-orange-600">
                             <span>✓</span>
                             <span>Range length from profile: {maxBars} bars</span>
                           </div>
                         )}
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-gray-400">
+                        <label className="mb-1 block text-xs text-gray-600">
                           Commission
                           <InfoIcon tooltip="Fixed cost per trade in dollars. Charged on both entry and exit. Examples: $0.50, $1, $5." />
                         </label>
                         <input
                           type="text"
                           inputMode="decimal"
-                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          className="w-full rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
                           value={commissionInput}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -2999,14 +2999,14 @@ function BacktestPageContent() {
                         />
                       </div>
                       <div className="col-span-2">
-                        <label className="mb-1 block text-xs text-gray-400">
+                        <label className="mb-1 block text-xs text-gray-600">
                           Slippage (bps)
                           <InfoIcon tooltip="Price slippage in basis points (1 bps = 0.01%). Simulates market impact. Example: 5 bps on a $100 stock = $0.05 per share." />
                         </label>
                         <input
                           type="text"
                           inputMode="decimal"
-                          className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                          className="w-full rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
                           value={slippageInput}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -3029,8 +3029,8 @@ function BacktestPageContent() {
                 </section>
 
                 {/* Strategy Selection */}
-                <section className="relative z-20 rounded-xl border border-gray-800 bg-gray-900/80 p-3 shadow-xl backdrop-blur-sm">
-                  <h3 className="mb-2 text-xs font-semibold text-gray-200">Strategy</h3>
+                <section className="relative z-20 rounded-xl border border-orange-200 bg-white/90 p-3 shadow-xl backdrop-blur-sm">
+                  <h3 className="mb-2 text-xs font-semibold text-gray-800">Strategy</h3>
                   <div className="mb-3 flex gap-2">
                     <button
                       type="button"
@@ -3038,7 +3038,7 @@ function BacktestPageContent() {
                       className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                         mode === "builtin"
                           ? "bg-white text-black shadow-lg shadow-white/30"
-                          : "border border-gray-700 text-gray-300 hover:border-gray-600"
+                          : "border border-orange-300 text-gray-700 hover:border-gray-600"
                       }`}
                     >
                       Built-in
@@ -3049,7 +3049,7 @@ function BacktestPageContent() {
                       className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                         mode === "custom"
                           ? "bg-white text-black shadow-lg shadow-white/30"
-                          : "border border-gray-700 text-gray-300 hover:border-gray-600"
+                          : "border border-orange-300 text-gray-700 hover:border-gray-600"
                       }`}
                     >
                       Advanced
@@ -3074,7 +3074,7 @@ function BacktestPageContent() {
                       disabled={!builtinList.length}
                     />
                     {builtinId && (
-                      <p className="text-[11px] text-gray-500 break-words">
+                      <p className="text-[11px] text-gray-9000 break-words">
                         {builtinList.find((b) => b.id === builtinId)?.description}
                       </p>
                     )}
@@ -3084,14 +3084,14 @@ function BacktestPageContent() {
                         ?.params.filter((p) => p.name !== 'qty')
                         .map((p) => (
                           <div key={p.name}>
-                            <label className="mb-1 block text-xs text-gray-400">
+                            <label className="mb-1 block text-xs text-gray-600">
                               {p.name} ({p.type})
                               {PARAM_TOOLTIPS[p.name] && <InfoIcon tooltip={PARAM_TOOLTIPS[p.name]} />}
                             </label>
                             <input
                               type="text"
                               inputMode={p.type === "int" ? "numeric" : "decimal"}
-                              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
+                              className="w-full rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-white focus:ring-2 focus:ring-white/20"
                               value={builtinParamInputs[p.name] ?? String(builtinParams[p.name] ?? p.default)}
                               onChange={(e) => handleBuiltinParamChange(p, e.target.value)}
                               onBlur={() => handleBuiltinParamBlur(p)}
@@ -3107,18 +3107,18 @@ function BacktestPageContent() {
                         <button
                           key={template.id}
                           type="button"
-                          className="rounded border border-gray-700 px-2 py-1 text-gray-300 transition hover:border-white"
+                          className="rounded border border-orange-300 px-2 py-1 text-gray-700 transition hover:border-white"
                           onClick={() => handleTemplateInsert(template.code)}
                         >
                           {template.label}
                         </button>
                       ))}
                     </div>
-                    <div className="relative rounded-xl border border-gray-800 bg-gray-950 scrollbar-hide">
+                    <div className="relative rounded-xl border border-orange-200 bg-white scrollbar-hide">
                       <button
                         type="button"
                         onClick={() => setEditorExpanded(!editorExpanded)}
-                        className="absolute top-2 right-2 z-10 rounded bg-gray-800/80 px-2 py-1 text-[11px] text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                        className="absolute top-2 right-2 z-10 rounded bg-orange-50/80 px-2 py-1 text-[11px] text-gray-700 transition hover:bg-gray-700 hover:text-gray-900"
                         title={editorExpanded ? "Exit fullscreen" : "Expand editor"}
                       >
                         {editorExpanded ? "✕ Exit" : "⛶ Expand"}
@@ -3132,18 +3132,18 @@ function BacktestPageContent() {
                       />
                     </div>
                     {editorExpanded && (
-                      <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 p-4">
+                      <div className="fixed inset-0 z-50 flex flex-col bg-white p-4">
                         <div className="mb-2 flex items-center justify-between">
-                          <h2 className="text-lg font-semibold text-white">Strategy Code Editor</h2>
+                          <h2 className="text-lg font-semibold text-gray-900">Strategy Code Editor</h2>
                           <button
                             type="button"
                             onClick={() => setEditorExpanded(false)}
-                            className="rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                            className="rounded bg-orange-50 px-3 py-1.5 text-sm text-gray-700 transition hover:bg-gray-700 hover:text-gray-900"
                           >
                             ✕ Close
                           </button>
                         </div>
-                        <div className="flex-1 rounded-xl border border-gray-800 bg-gray-950 overflow-hidden">
+                        <div className="flex-1 rounded-xl border border-orange-200 bg-white overflow-hidden">
                           <CodeEditor
                             value={strategyCode}
                             height="100%"
@@ -3155,13 +3155,13 @@ function BacktestPageContent() {
                       </div>
                     )}
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold text-gray-300">Strategy Parameters (JSON)</label>
+                      <label className="text-xs font-semibold text-gray-700">Strategy Parameters (JSON)</label>
                       <div className="flex flex-wrap gap-2 text-[11px]">
                         {STRATEGY_PARAM_PRESETS.map((preset) => (
                           <button
                             type="button"
                             key={preset.id}
-                            className="rounded border border-gray-700 px-2 py-1 text-gray-300 transition hover:border-white"
+                            className="rounded border border-orange-300 px-2 py-1 text-gray-700 transition hover:border-white"
                             onClick={() => handleApplyPreset(preset)}
                           >
                             {preset.label}
@@ -3172,7 +3172,7 @@ function BacktestPageContent() {
                         className={`w-full min-h-[100px] rounded-lg border px-3 py-2 text-xs font-mono outline-none transition focus:ring-2 ${
                           strategyParamsError
                             ? "border-rose-600 bg-rose-950/20 focus:border-rose-500 focus:ring-rose-500/20"
-                            : "border-gray-700 bg-gray-950 focus:border-white focus:ring-white/20"
+                            : "border-orange-300 bg-white focus:border-white focus:ring-white/20"
                         }`}
                         placeholder='{}\n// optional JSON params'
                         value={strategyParamsRaw}
@@ -3182,22 +3182,22 @@ function BacktestPageContent() {
                         <p className="text-[11px] text-rose-400">{strategyParamsError}</p>
                       )}
                       {customParamPresets.length > 0 && (
-                        <div className="flex flex-wrap gap-2 text-[11px] text-gray-300">
+                        <div className="flex flex-wrap gap-2 text-[11px] text-gray-700">
                           {customParamPresets.map((preset) => (
                             <div
                               key={preset.id}
-                              className="inline-flex items-center gap-1 rounded-full border border-gray-700 px-2 py-1"
+                              className="inline-flex items-center gap-1 rounded-full border border-orange-300 px-2 py-1"
                             >
                               <button
                                 type="button"
-                                className="text-gray-200 hover:text-white"
+                                className="text-gray-800 hover:text-gray-900"
                                 onClick={() => handleApplyPreset(preset)}
                               >
                                 {preset.label}
                               </button>
                               <button
                                 type="button"
-                                className="text-gray-500 hover:text-rose-400"
+                                className="text-gray-9000 hover:text-rose-400"
                                 aria-label={`Delete preset ${preset.label}`}
                                 onClick={() => handleDeletePreset(preset.id)}
                               >
@@ -3210,7 +3210,7 @@ function BacktestPageContent() {
                       <div className="space-y-2">
                         <div className="flex flex-col gap-2 sm:flex-row">
                           <input
-                            className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-xs outline-none transition focus:border-white focus:ring-white/20"
+                            className="w-full rounded-lg border border-orange-300 bg-white px-3 py-2 text-xs outline-none transition focus:border-white focus:ring-white/20"
                             placeholder="Preset name"
                             value={newPresetName}
                             onChange={(e) => setNewPresetName(e.target.value)}
@@ -3218,7 +3218,7 @@ function BacktestPageContent() {
                           <button
                             type="button"
                             onClick={handleSavePreset}
-                            className="rounded-lg border border-gray-700 px-3 py-2 text-xs font-semibold text-gray-200 transition hover:border-white hover:text-white"
+                            className="rounded-lg border border-orange-300 px-3 py-2 text-xs font-semibold text-gray-800 transition hover:border-white hover:text-gray-900"
                           >
                             Save Preset
                           </button>
@@ -3265,7 +3265,7 @@ function BacktestPageContent() {
                         ? "text-rose-400"
                         : lintStatus === "passed"
                           ? "text-emerald-400"
-                          : "text-white"
+                          : "text-gray-900"
                     }`}
                   >
                     {lintMessage ?? (lintStatus === "checking" ? "Linting..." : null)}
@@ -3278,19 +3278,19 @@ function BacktestPageContent() {
             <main className="mt-4 flex-1 space-y-6 transition-all duration-200 lg:mt-0 lg:min-w-0">
               {!result ? (
                 previewLoading ? (
-                  <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
+                  <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-orange-200 bg-white/70 backdrop-blur-sm">
                     <div className="text-center">
                       <div className="mb-3 text-4xl">📈</div>
-                      <h3 className="mb-2 text-lg font-semibold text-gray-200">Loading Price Chart…</h3>
-                      <p className="text-sm text-gray-400">Fetching dataset preview for charting</p>
+                      <h3 className="mb-2 text-lg font-semibold text-gray-800">Loading Price Chart…</h3>
+                      <p className="text-sm text-gray-600">Fetching dataset preview for charting</p>
                     </div>
                   </div>
                 ) : previewOHLCData.length > 0 ? (
-                  <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
+                  <section className="rounded-2xl border border-orange-200 bg-white/90 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h2 className="text-lg font-semibold text-gray-50">Price Chart Preview</h2>
-                        <p className="text-xs text-gray-400">
+                        <h2 className="text-lg font-semibold text-gray-900">Price Chart Preview</h2>
+                        <p className="text-xs text-gray-600">
                           Explore the dataset and draw trendlines or horizontal levels before running a backtest.
                         </p>
                       </div>
@@ -3306,7 +3306,7 @@ function BacktestPageContent() {
                           className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
                             annotationMode === "trend"
                               ? "border-sky-400 text-sky-200"
-                              : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                              : "border-orange-300 text-gray-600 hover:border-white hover:text-gray-900"
                           }`}
                         >
                           Trend
@@ -3317,7 +3317,7 @@ function BacktestPageContent() {
                           className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
                             annotationMode === "horizontal"
                               ? "border-rose-400 text-rose-200"
-                              : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                              : "border-orange-300 text-gray-600 hover:border-white hover:text-gray-900"
                           }`}
                         >
                           Horizontal
@@ -3326,14 +3326,14 @@ function BacktestPageContent() {
                           type="button"
                           onClick={() => setPriceAnnotations([])}
                           disabled={priceAnnotations.length === 0}
-                          className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-lg border border-orange-300 px-3 py-1 text-[11px] font-semibold text-gray-600 transition hover:border-white hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Clear Drawings
                         </button>
                         <button
                           type="button"
                           onClick={() => setPriceChartResetKey((key) => key + 1)}
-                          className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                          className="rounded-lg border border-orange-300 px-3 py-1 text-[11px] font-semibold text-gray-600 transition hover:border-white hover:text-gray-900"
                         >
                           Reset Zoom
                         </button>
@@ -3379,11 +3379,11 @@ function BacktestPageContent() {
                     </div>
                   </section>
                 ) : (
-                  <div className="flex min-h-[600px] items-center justify-center rounded-2xl border border-gray-800 bg-gray-900/40 backdrop-blur-sm">
+                  <div className="flex min-h-[600px] items-center justify-center rounded-2xl border border-orange-200 bg-white/70 backdrop-blur-sm">
                     <div className="text-center">
                       <div className="mb-3 text-4xl">📊</div>
-                      <h3 className="mb-2 text-lg font-semibold text-gray-200">No Results Yet</h3>
-                      <p className="text-sm text-gray-400">
+                      <h3 className="mb-2 text-lg font-semibold text-gray-800">No Results Yet</h3>
+                      <p className="text-sm text-gray-600">
                         {previewError ?? "Configure your strategy and run a backtest to see results"}
                       </p>
                     </div>
@@ -3392,17 +3392,17 @@ function BacktestPageContent() {
               ) : (
                 <>
                   {/* Equity Summary */}
-                  <section className="rounded-2xl border-2 border-blue-700 bg-blue-950/30 p-5 shadow-xl backdrop-blur-sm mb-6">
-                    <h2 className="text-lg font-semibold text-blue-300 mb-4">Equity Summary</h2>
+                  <section className="rounded-2xl border-2 border-orange-600 bg-orange-50/30 p-5 shadow-xl backdrop-blur-sm mb-6">
+                    <h2 className="text-lg font-semibold text-orange-500 mb-4">Equity Summary</h2>
                     <div className="grid grid-cols-2 gap-6">
                       <div>
-                        <div className="text-xs text-blue-400 font-semibold mb-1">Initial Equity</div>
-                        <div className="text-2xl font-mono font-bold text-white">
+                        <div className="text-xs text-orange-600 font-semibold mb-1">Initial Equity</div>
+                        <div className="text-2xl font-mono font-bold text-gray-900">
                           ${initialCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-blue-400 font-semibold mb-1">Final Equity</div>
+                        <div className="text-xs text-orange-600 font-semibold mb-1">Final Equity</div>
                         <div className={`text-2xl font-mono font-bold ${
                           result.stats.total_return >= 0 ? "text-green-400" : "text-red-400"
                         }`}>
@@ -3410,9 +3410,9 @@ function BacktestPageContent() {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-4 pt-4 border-t border-blue-800">
+                    <div className="mt-4 pt-4 border-t border-orange-700">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-blue-300 font-semibold">Total Change</span>
+                        <span className="text-sm text-orange-500 font-semibold">Total Change</span>
                         <span className={`text-xl font-mono font-bold ${
                           result.stats.total_return >= 0 ? "text-green-400" : "text-red-400"
                         }`}>
@@ -3423,10 +3423,10 @@ function BacktestPageContent() {
                   </section>
 
                   {/* Key Metrics Bar */}
-                  <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
+                  <section className="rounded-2xl border border-orange-200 bg-white/90 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex items-center justify-between">
-                      <h2 className="text-lg font-semibold text-gray-50">Performance Overview</h2>
-                      <span className="text-[11px] text-gray-400">Run ID: {result.run_id?.slice(0, 8)}</span>
+                      <h2 className="text-lg font-semibold text-gray-900">Performance Overview</h2>
+                      <span className="text-[11px] text-gray-600">Run ID: {result.run_id?.slice(0, 8)}</span>
                     </div>
 
                     {/* Top 4-5 Key Metrics */}
@@ -3459,12 +3459,12 @@ function BacktestPageContent() {
                       <button
                         type="button"
                         onClick={() => setShowMoreMetrics(!showMoreMetrics)}
-                        className="flex w-full items-center justify-between rounded-lg border border-gray-700 bg-gray-950/40 px-4 py-2 text-sm text-gray-300 transition hover:border-gray-600"
+                        className="flex w-full items-center justify-between rounded-lg border border-orange-300 bg-white/40 px-4 py-2 text-sm text-gray-700 transition hover:border-gray-600"
                       >
                         <span>{showMoreMetrics ? "Hide" : "Show"} Additional Metrics</span>
-                        <span className="text-gray-500">{showMoreMetrics ? "−" : "+"}</span>
+                        <span className="text-gray-9000">{showMoreMetrics ? "−" : "+"}</span>
                       </button>
-                      <Collapse open={showMoreMetrics} className="mt-3 rounded-lg border border-gray-800 bg-gray-950/40 p-4">
+                      <Collapse open={showMoreMetrics} className="mt-3 rounded-lg border border-orange-200 bg-white/40 p-4">
                         <div className="grid gap-2 md:grid-cols-2">
                           <SecondaryMetricRow
                             label="Annualized Return"
@@ -3581,16 +3581,16 @@ function BacktestPageContent() {
                   </section>
 
                   {/* Charts Grid - Equity + Price Stacked */}
-                  <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
+                  <section className="rounded-2xl border border-orange-200 bg-white/90 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <h2 className="text-lg font-semibold text-gray-50">Charts</h2>
+                      <h2 className="text-lg font-semibold text-gray-900">Charts</h2>
                       <div className="flex items-center gap-3">
-                        <span className="text-[11px] text-gray-400">Drag to zoom • Click markers for details</span>
+                        <span className="text-[11px] text-gray-600">Drag to zoom • Click markers for details</span>
                         {totalBars > 1 && (
                           <button
                             type="button"
                             onClick={resetChartWindow}
-                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-[11px] font-semibold text-gray-300 transition hover:border-white hover:text-white"
+                            className="rounded-lg border border-orange-300 px-3 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:border-white hover:text-gray-900"
                           >
                             Reset Zoom
                           </button>
@@ -3602,9 +3602,9 @@ function BacktestPageContent() {
                     <div className="grid grid-cols-1 gap-4">
                       {equityData && (
                         <div
-                          className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                          className={`rounded-lg border border-orange-300 bg-white/60 p-3 ${chartIntroClass}`}
                         >
-                          <div className="mb-2 text-xs font-semibold text-gray-300">Equity Curve</div>
+                          <div className="mb-2 text-xs font-semibold text-gray-700">Equity Curve</div>
                           <ZoomableChart
                             key={`${chartInstanceKey}-equity`}
                             data={equityData}
@@ -3620,11 +3620,11 @@ function BacktestPageContent() {
                       )}
                       {priceOHLCData.length > 0 && (
                         <div
-                          className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                          className={`rounded-lg border border-orange-300 bg-white/60 p-3 ${chartIntroClass}`}
                           style={{ animationDelay: chartsIntro ? "100ms" : "0ms" }}
                         >
                           <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold text-gray-300">Price Chart</div>
+                            <div className="text-xs font-semibold text-gray-700">Price Chart</div>
                             <div className="flex items-center gap-2">
                               <ChartControls
                                 chartType={priceChartType}
@@ -3637,7 +3637,7 @@ function BacktestPageContent() {
                                 className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
                                   annotationMode === "trend"
                                     ? "border-sky-400 text-sky-200"
-                                    : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                                    : "border-orange-300 text-gray-600 hover:border-white hover:text-gray-900"
                                 }`}
                               >
                                 Trend
@@ -3648,7 +3648,7 @@ function BacktestPageContent() {
                                 className={`rounded-lg border px-3 py-1 text-[11px] font-semibold transition ${
                                   annotationMode === "horizontal"
                                     ? "border-rose-400 text-rose-200"
-                                    : "border-gray-700 text-gray-400 hover:border-white hover:text-white"
+                                    : "border-orange-300 text-gray-600 hover:border-white hover:text-gray-900"
                                 }`}
                               >
                                 Horizontal
@@ -3657,14 +3657,14 @@ function BacktestPageContent() {
                                 type="button"
                                 onClick={() => setPriceAnnotations([])}
                                 disabled={priceAnnotations.length === 0}
-                                className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-lg border border-orange-300 px-3 py-1 text-[11px] font-semibold text-gray-600 transition hover:border-white hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 Clear Drawings
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setPriceChartResetKey((key) => key + 1)}
-                                className="rounded-lg border border-gray-700 px-3 py-1 text-[11px] font-semibold text-gray-400 transition hover:border-white hover:text-white"
+                                className="rounded-lg border border-orange-300 px-3 py-1 text-[11px] font-semibold text-gray-600 transition hover:border-white hover:text-gray-900"
                               >
                                 Reset Zoom
                               </button>
@@ -3714,10 +3714,10 @@ function BacktestPageContent() {
                     {/* Drawdown Chart - Full Width Below */}
                     {drawdownData && (
                       <div
-                        className={`mt-4 rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                        className={`mt-4 rounded-lg border border-orange-300 bg-white/60 p-3 ${chartIntroClass}`}
                         style={{ animationDelay: chartsIntro ? "200ms" : "0ms" }}
                       >
-                        <div className="mb-2 text-xs font-semibold text-gray-300">Drawdown</div>
+                        <div className="mb-2 text-xs font-semibold text-gray-700">Drawdown</div>
                         <ZoomableChart
                           key={`${chartInstanceKey}-drawdown`}
                           data={drawdownData}
@@ -3738,10 +3738,10 @@ function BacktestPageContent() {
                         {/* Cumulative P&L Chart */}
                         {cumulativePnLData && (
                           <div
-                            className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                            className={`rounded-lg border border-orange-300 bg-white/60 p-3 ${chartIntroClass}`}
                             style={{ animationDelay: chartsIntro ? "300ms" : "0ms" }}
                           >
-                            <div className="mb-2 text-xs font-semibold text-gray-300">Cumulative P&L</div>
+                            <div className="mb-2 text-xs font-semibold text-gray-700">Cumulative P&L</div>
                             <div className="h-[280px]">
                               <Line data={cumulativePnLData} options={cumulativePnLOptions} />
                             </div>
@@ -3751,10 +3751,10 @@ function BacktestPageContent() {
                         {/* Trade Distribution Histogram */}
                         {tradeDistributionData && (
                           <div
-                            className={`rounded-lg border border-gray-700 bg-gray-950/60 p-3 ${chartIntroClass}`}
+                            className={`rounded-lg border border-orange-300 bg-white/60 p-3 ${chartIntroClass}`}
                             style={{ animationDelay: chartsIntro ? "400ms" : "0ms" }}
                           >
-                            <div className="mb-2 text-xs font-semibold text-gray-300">Trade P&L Distribution</div>
+                            <div className="mb-2 text-xs font-semibold text-gray-700">Trade P&L Distribution</div>
                             <div className="h-[280px]">
                               <Bar data={tradeDistributionData} options={histogramOptions} />
                             </div>
@@ -3765,9 +3765,9 @@ function BacktestPageContent() {
                   </section>
 
                   {/* Tabs: Trades | Orders | History */}
-                  <section className="rounded-2xl border border-gray-800 bg-gray-900/80 p-5 shadow-xl backdrop-blur-sm">
+                  <section className="rounded-2xl border border-orange-200 bg-white/90 p-5 shadow-xl backdrop-blur-sm">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                      <h2 className="text-lg font-semibold text-gray-50">Details</h2>
+                      <h2 className="text-lg font-semibold text-gray-900">Details</h2>
                       <div className="flex flex-wrap gap-2">
                         {/* Export Buttons */}
                         <div className="flex gap-2">
@@ -3799,7 +3799,7 @@ function BacktestPageContent() {
                               a.click();
                               URL.revokeObjectURL(url);
                             }}
-                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
+                            className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-600 hover:text-gray-900 transition"
                           >
                             Export Metrics (CSV)
                           </button>
@@ -3829,7 +3829,7 @@ function BacktestPageContent() {
                               a.click();
                               URL.revokeObjectURL(url);
                             }}
-                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
+                            className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-600 hover:text-gray-900 transition"
                           >
                             Export Trades (CSV)
                           </button>
@@ -3846,7 +3846,7 @@ function BacktestPageContent() {
                               a.click();
                               URL.revokeObjectURL(url);
                             }}
-                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-gray-600 hover:text-white transition"
+                            className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-600 hover:text-gray-900 transition"
                           >
                             Export Full (JSON)
                           </button>
@@ -3865,7 +3865,7 @@ function BacktestPageContent() {
                               className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
                                 detailTab === tab.id
                                   ? "bg-white text-black shadow-lg shadow-white/20"
-                                  : "border border-gray-700 text-gray-300 hover:border-gray-600"
+                                  : "border border-orange-300 text-gray-700 hover:border-gray-600"
                               }`}
                               onClick={() => setDetailTab(tab.id as typeof detailTab)}
                             >
@@ -3886,8 +3886,8 @@ function BacktestPageContent() {
                               onClick={() => setTradeFilter(filter as typeof tradeFilter)}
                               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                                 tradeFilter === filter
-                                  ? "bg-white/20 text-white border border-white/50"
-                                  : "border border-gray-700 text-gray-400 hover:text-gray-300"
+                                  ? "bg-white/20 text-gray-900 border border-white/50"
+                                  : "border border-orange-300 text-gray-600 hover:text-gray-700"
                               }`}
                             >
                               {filter}
@@ -3896,14 +3896,14 @@ function BacktestPageContent() {
                           <input
                             type="text"
                             placeholder="Search timestamp"
-                            className="ml-auto flex-1 min-w-[180px] rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-100 outline-none focus:border-white focus:ring-2 focus:ring-white/20"
+                            className="ml-auto flex-1 min-w-[180px] rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-xs text-gray-900 outline-none focus:border-white focus:ring-2 focus:ring-white/20"
                             value={tradeSearch}
                             onChange={(e) => setTradeSearch(e.target.value)}
                           />
                         </div>
-                        <div className="overflow-auto rounded-lg border border-gray-700">
+                        <div className="overflow-auto rounded-lg border border-orange-300">
                           <table className="w-full text-sm">
-                            <thead className="sticky top-0 bg-gray-950/90 text-[11px] uppercase tracking-wide text-gray-400">
+                            <thead className="sticky top-0 bg-white/90 text-[11px] uppercase tracking-wide text-gray-600">
                               <tr>
                                 <th className="px-3 py-2 text-left">Timestamp</th>
                                 <th className="px-3 py-2 text-left">Side</th>
@@ -3915,7 +3915,7 @@ function BacktestPageContent() {
                             <tbody>
                               {filteredTrades.length === 0 && (
                                 <tr>
-                                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-500">
+                                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-9000">
                                     No trades match your filters.
                                   </td>
                                 </tr>
@@ -3925,12 +3925,12 @@ function BacktestPageContent() {
                                 return (
                                   <tr
                                     key={`${t.timestamp}-${idx}`}
-                                    className={`cursor-pointer border-t border-gray-800/60 transition hover:bg-gray-800/40 ${
-                                      isSelected ? "bg-gray-800/60" : ""
+                                    className={`cursor-pointer border-t border-orange-200/60 transition hover:bg-orange-50/40 ${
+                                      isSelected ? "bg-orange-50/60" : ""
                                     }`}
                                     onClick={() => setSelectedTrade(t)}
                                   >
-                                    <td className="px-3 py-2 text-xs text-gray-300">
+                                    <td className="px-3 py-2 text-xs text-gray-700">
                                       {formatTradeTimestamp(t.timestamp)}
                                     </td>
                                     <td
@@ -3942,8 +3942,8 @@ function BacktestPageContent() {
                                     >
                                       {t.side?.toUpperCase()}
                                     </td>
-                                    <td className="px-3 py-2 text-right text-gray-200">{t.qty}</td>
-                                    <td className="px-3 py-2 text-right text-gray-200">
+                                    <td className="px-3 py-2 text-right text-gray-800">{t.qty}</td>
+                                    <td className="px-3 py-2 text-right text-gray-800">
                                       {typeof t.price === "number" ? t.price.toFixed(2) : "—"}
                                     </td>
                                     <td
@@ -3962,39 +3962,39 @@ function BacktestPageContent() {
                           </table>
                         </div>
                         {selectedTrade && (
-                          <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-4">
-                            <div className="mb-2 text-xs uppercase tracking-wide text-gray-400">
+                          <div className="rounded-lg border border-orange-300 bg-white/60 p-4">
+                            <div className="mb-2 text-xs uppercase tracking-wide text-gray-600">
                               Selected Trade Details
                             </div>
                             <div className="grid grid-cols-2 gap-3 text-sm">
                               <div>
-                                <span className="text-gray-400">Timestamp:</span>{" "}
-                                <span className="text-gray-200">{formatTradeTimestamp(selectedTrade.timestamp)}</span>
+                                <span className="text-gray-600">Timestamp:</span>{" "}
+                                <span className="text-gray-800">{formatTradeTimestamp(selectedTrade.timestamp)}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">Symbol:</span>{" "}
-                                <span className="text-gray-200">{selectedTrade.symbol ?? symbol}</span>
+                                <span className="text-gray-600">Symbol:</span>{" "}
+                                <span className="text-gray-800">{selectedTrade.symbol ?? symbol}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">Side:</span>{" "}
-                                <span className="font-semibold text-gray-200">{selectedTrade.side}</span>
+                                <span className="text-gray-600">Side:</span>{" "}
+                                <span className="font-semibold text-gray-800">{selectedTrade.side}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">Qty:</span>{" "}
-                                <span className="text-gray-200">{selectedTrade.qty}</span>
+                                <span className="text-gray-600">Qty:</span>{" "}
+                                <span className="text-gray-800">{selectedTrade.qty}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">Price:</span>{" "}
-                                <span className="text-gray-200">{selectedTrade.price?.toFixed(4)}</span>
+                                <span className="text-gray-600">Price:</span>{" "}
+                                <span className="text-gray-800">{selectedTrade.price?.toFixed(4)}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">Commission:</span>{" "}
-                                <span className="text-gray-200">{selectedTrade.commission?.toFixed(2) ?? "—"}</span>
+                                <span className="text-gray-600">Commission:</span>{" "}
+                                <span className="text-gray-800">{selectedTrade.commission?.toFixed(2) ?? "—"}</span>
                               </div>
                             </div>
                             <button
                               type="button"
-                              className="mt-3 text-xs text-gray-400 underline"
+                              className="mt-3 text-xs text-gray-600 underline"
                               onClick={() => setSelectedTrade(null)}
                             >
                               Clear selection
@@ -4003,9 +4003,9 @@ function BacktestPageContent() {
                         )}
                       </div>
                     ) : detailTab === "orders" ? (
-                      <div className="overflow-auto rounded-lg border border-gray-700">
+                      <div className="overflow-auto rounded-lg border border-orange-300">
                         <table className="w-full text-sm">
-                          <thead className="sticky top-0 bg-gray-950/90 text-[11px] uppercase tracking-wide text-gray-400">
+                          <thead className="sticky top-0 bg-white/90 text-[11px] uppercase tracking-wide text-gray-600">
                             <tr>
                               <th className="px-3 py-2 text-left">ID</th>
                               <th className="px-3 py-2 text-left">Symbol</th>
@@ -4019,13 +4019,13 @@ function BacktestPageContent() {
                           <tbody>
                             {result.orders.length === 0 && (
                               <tr>
-                                <td colSpan={7} className="px-3 py-8 text-center text-sm text-gray-500">
+                                <td colSpan={7} className="px-3 py-8 text-center text-sm text-gray-9000">
                                   No orders were generated.
                                 </td>
                               </tr>
                             )}
                             {result.orders.map((order) => (
-                              <tr key={order.id} className="border-t border-gray-800/60 text-gray-200">
+                              <tr key={order.id} className="border-t border-orange-200/60 text-gray-800">
                                 <td className="px-3 py-2 text-xs font-mono">{order.id}</td>
                                 <td className="px-3 py-2 text-xs">{order.symbol}</td>
                                 <td
@@ -4042,7 +4042,7 @@ function BacktestPageContent() {
                                 <td className="px-3 py-2 text-right text-xs">
                                   {order.avg_fill_price?.toFixed(2) ?? "—"}
                                 </td>
-                                <td className="px-3 py-2 text-xs uppercase tracking-wide text-gray-400">
+                                <td className="px-3 py-2 text-xs uppercase tracking-wide text-gray-600">
                                   {order.status}
                                 </td>
                               </tr>
@@ -4052,12 +4052,12 @@ function BacktestPageContent() {
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div className="rounded-lg border border-gray-700 bg-gray-950/40 p-4">
+                        <div className="rounded-lg border border-orange-300 bg-white/40 p-4">
                           <div className="mb-3 flex items-center justify-between">
-                            <h3 className="text-sm font-semibold text-gray-200">Server Runs</h3>
+                            <h3 className="text-sm font-semibold text-gray-800">Server Runs</h3>
                             <button
                               type="button"
-                              className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white"
+                              className="rounded-lg border border-orange-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-white"
                               onClick={fetchServerRuns}
                               disabled={serverRunsLoading}
                             >
@@ -4075,19 +4075,19 @@ function BacktestPageContent() {
                               {serverRuns.map((run) => (
                                 <div
                                   key={run.run_id}
-                                  className="rounded-lg border border-gray-800 bg-gray-950/60 p-3"
+                                  className="rounded-lg border border-orange-200 bg-white/60 p-3"
                                 >
                                   <div className="mb-2 flex items-center justify-between">
-                                    <span className="font-semibold text-gray-100">
+                                    <span className="font-semibold text-gray-900">
                                       {run.symbol ?? "—"}
                                     </span>
-                                    <span className="text-[10px] text-gray-500">
+                                    <span className="text-[10px] text-gray-9000">
                                       {run.saved_at
                                         ? new Date(run.saved_at).toLocaleString()
                                         : "Unknown"}
                                     </span>
                                   </div>
-                                  <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                                  <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-600">
                                     <span>
                                       Ret:{" "}
                                       {run.total_return != null
@@ -4103,7 +4103,7 @@ function BacktestPageContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    className="w-full rounded-lg border border-gray-700 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white disabled:opacity-50"
+                                    className="w-full rounded-lg border border-orange-300 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-white disabled:opacity-50"
                                     onClick={() => handleLoadServerRun(run.run_id)}
                                     disabled={serverRunLoadingId === run.run_id}
                                   >
@@ -4113,32 +4113,32 @@ function BacktestPageContent() {
                               ))}
                             </div>
                           ) : (
-                            <p className="text-sm text-gray-400">No server runs available.</p>
+                            <p className="text-sm text-gray-600">No server runs available.</p>
                           )}
                         </div>
 
-                        <div className="rounded-lg border border-gray-700 bg-gray-950/40 p-4">
-                          <h3 className="mb-3 text-sm font-semibold text-gray-200">Local History</h3>
+                        <div className="rounded-lg border border-orange-300 bg-white/40 p-4">
+                          <h3 className="mb-3 text-sm font-semibold text-gray-800">Local History</h3>
                           {history.length ? (
                             <div className="grid gap-3 md:grid-cols-2">
                               {history.map((h, idx) => (
                                 <div
                                   key={`${h.savedAt}-${idx}`}
-                                  className="rounded-lg border border-gray-800 bg-gray-950/60 p-3"
+                                  className="rounded-lg border border-orange-200 bg-white/60 p-3"
                                 >
                                   <div className="mb-2 flex items-center justify-between">
-                                    <span className="font-semibold text-gray-100">{h.form.symbol}</span>
-                                    <span className="text-[10px] text-gray-500">
+                                    <span className="font-semibold text-gray-900">{h.form.symbol}</span>
+                                    <span className="text-[10px] text-gray-9000">
                                       {new Date(h.savedAt).toLocaleString()}
                                     </span>
                                   </div>
-                                  <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                                  <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-600">
                                     <span>Ret: {(h.result.stats.total_return * 100).toFixed(2)}%</span>
                                     <span>Sharpe: {h.result.stats.sharpe != null ? h.result.stats.sharpe.toFixed(2) : "N/A"}</span>
                                   </div>
                                   <div className="flex gap-2">
                                     <button
-                                      className="flex-1 rounded-lg border border-gray-700 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white"
+                                      className="flex-1 rounded-lg border border-orange-300 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-white"
                                       onClick={() => {
                                         setResult(h.result);
                                         setDetailTab("trades");
@@ -4147,7 +4147,7 @@ function BacktestPageContent() {
                                       View
                                     </button>
                                     <button
-                                      className="flex-1 rounded-lg border border-gray-700 py-1.5 text-xs font-semibold text-gray-300 transition hover:border-white"
+                                      className="flex-1 rounded-lg border border-orange-300 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-white"
                                       onClick={() => {
                                         setSymbol(h.form.symbol);
                                         setCsvPath(h.form.csvPath);
@@ -4169,7 +4169,7 @@ function BacktestPageContent() {
                               ))}
                             </div>
                           ) : (
-                            <p className="text-sm text-gray-400">No local history.</p>
+                            <p className="text-sm text-gray-600">No local history.</p>
                           )}
                         </div>
                       </div>
@@ -4209,7 +4209,7 @@ export default function Page() {
       <div className="flex items-center justify-center min-h-screen bg-black">
         <div className="text-center space-y-3">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto"></div>
-          <p className="text-gray-400">Loading backtest...</p>
+          <p className="text-gray-600">Loading backtest...</p>
         </div>
       </div>
     }>

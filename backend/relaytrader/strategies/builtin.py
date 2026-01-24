@@ -303,6 +303,7 @@ class BuyAndHold(Strategy):
 
 
 BUILTIN_STRATEGIES: Dict[str, StrategyDefinition] = {
+    #note that these params are just defaults; users can modify them in the actual backtest
     "mean_reversion": StrategyDefinition(
         id="mean_reversion",
         name="Mean Reversion (Z-Score)",

@@ -231,7 +231,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             </p>
 
             <button
-              onClick={onGetStarted}i
+              onClick={onGetStarted}
               className="group inline-flex items-center gap-3 rounded-lg bg-blue-600 px-8 py-4 text-white transition-all hover:bg-blue-700 hover:gap-4"
             >
               <span className="text-lg">Start Backtesting</span>
